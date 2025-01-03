@@ -2,103 +2,130 @@
 
 namespace Hooks {
     struct ShowSubtitle {
-        // A static variable to store the last processed player's topic text
+        // Holds the last processed player's topic text so we don't process duplicates.
         static inline std::string s_lastPlayerTopicText{};
 
         // ----------------------------------------------------------------------------
         // 1) Check function: determines if the topic has already been processed
         // ----------------------------------------------------------------------------
-        static bool HasAlreadyProcessed(const std::string& currentPlayerTopicText) {
-            // If the current topic is the same as the one we last processed, return true
-            if (currentPlayerTopicText == s_lastPlayerTopicText) return true;
-            return false;
-        }
+        static bool HasAlreadyProcessed(std::string_view a_topicText) { return a_topicText == s_lastPlayerTopicText; }
 
         // ----------------------------------------------------------------------------
         // 2) Update function: remember the last player topic after we process it
         // ----------------------------------------------------------------------------
-        static void UpdateLastPlayerTopicText(const std::string& currentPlayerTopicText) {
-            s_lastPlayerTopicText = currentPlayerTopicText;
+        static void UpdateLastPlayerTopicText(std::string_view a_topicText) {
+            s_lastPlayerTopicText = a_topicText;  // Copies from view into s_lastPlayerTopicText
         }
 
         // ----------------------------------------------------------------------------
-        // The main thunk that hooks the game
+        // 3) Fires a Mantella event (SKSE's custom event system)
         // ----------------------------------------------------------------------------
-        static void thunk(RE::SubtitleManager* a_this, RE::TESObjectREFR* a_speaker, const char* a_subtitle,
-                          bool a_alwaysDisplay) {
-            // Keep the original behavior
-            func(a_this, a_speaker, a_subtitle, a_alwaysDisplay);
-
-
-            if (a_speaker) {
-                if (auto dialogue = RE::MenuTopicManager::GetSingleton()->lastSelectedDialogue) {
-                    // First, check whether we have new player topic text.
-                    std::string currentPlayerTopicText = dialogue->topicText.c_str();
-                    if (HasAlreadyProcessed(currentPlayerTopicText)) {
-                        return;
-                    }
-
-                    // Now build and display the NPC response string
-                    std::string npcResponse;
-                    for (auto* response : dialogue->responses) {
-                        if (!response) {
-                            RE::DebugNotification("UpdateSelectedResponse: Found a null 'response'!");
-                            continue;
-                        }
-                        // Add the text if non-empty
-                        if (!response->text.empty()) {
-                            if (!npcResponse.empty()) npcResponse += " ";
-                            npcResponse += response->text.c_str();
-                        } else {
-                            RE::DebugNotification("UpdateSelectedResponse: 'response->text' is empty!");
-                        }
-                    }
-
-                    //Get actor name from a_speaker
-                    RE::Actor* actor = static_cast<RE::Actor*>(a_speaker);
-
-                    auto player = RE::PlayerCharacter::GetSingleton();
-                    const char* playerName = "Player:";
-                    if (player) {
-                        // You now have a reference to the player
-                        // Example: Display player's name
-                        playerName = player->GetActorBase()->GetName();
-                    }
-                    auto playerEvent = std::string(playerName) + ": " + currentPlayerTopicText;
-                    std::string npcEvent = std::string(actor->GetName()) + ": " + npcResponse;
-
-                    // If it's new, call AddMantellaEvent
-                    AddMantellaEvent(playerEvent.c_str());
-                    AddMantellaEvent(npcEvent.c_str());
-                    // And store the topic text, so we don’t process it again
-                    UpdateLastPlayerTopicText(currentPlayerTopicText);
-
-                }
+        static void AddMantellaEvent(const char* a_event) {
+            SKSE::ModCallbackEvent modEvent{"MantellaAddEvent", a_event};
+            if (auto modCallbackSource = SKSE::GetModCallbackEventSource(); modCallbackSource) {
+                modCallbackSource->SendEvent(&modEvent);
+            } else {
+                RE::DebugNotification("AddMantellaEvent: No ModCallbackEventSource found!");
             }
         }
 
- 
+        // ----------------------------------------------------------------------------
+        // 4) The main hook (thunk) that intercepts the call to show subtitles
+        // ----------------------------------------------------------------------------
+        static void thunk(RE::SubtitleManager* a_this, RE::TESObjectREFR* a_speaker, const char* a_subtitle,
+                          bool a_alwaysDisplay) {
+            // Preserve original functionality.
+            func(a_this, a_speaker, a_subtitle, a_alwaysDisplay);
 
-        // ----------------------------------------------------------------------------
-        // Fires a Mantella event
-        // ----------------------------------------------------------------------------
-        static void AddMantellaEvent(const char* event) {
-            SKSE::ModCallbackEvent modEvent{"MantellaAddEvent", event};
-            auto modCallbackSource = SKSE::GetModCallbackEventSource();
-            modCallbackSource->SendEvent(&modEvent);
+            // If there's no speaker, nothing else to do here.
+            if (!a_speaker) {
+                return;
+            }
+
+            auto topicManager = RE::MenuTopicManager::GetSingleton();
+            if (!topicManager) {
+                RE::DebugNotification("ShowSubtitle::thunk: MenuTopicManager is null!");
+                return;
+            }
+
+            auto dialogue = topicManager->lastSelectedDialogue;
+            if (!dialogue) {
+                // Sometimes there's no valid dialogue object.
+                return;
+            }
+
+            // Convert the dialogue topic text to a safe string for our checks.
+            const std::string currentPlayerTopicText = dialogue->topicText.c_str();
+            if (currentPlayerTopicText.empty()) {
+                // If for some reason there's no topic text, we don't process it.
+                RE::DebugNotification("ShowSubtitle::thunk: No player topic text found!");
+                return;
+            }
+
+            // Skip processing if we've already handled this exact player topic text.
+            if (HasAlreadyProcessed(currentPlayerTopicText)) {
+                return;
+            }
+
+            // Build the NPC response string
+            std::string npcResponse;
+            for (auto* response : dialogue->responses) {
+                if (!response) {
+                    RE::DebugNotification("ShowSubtitle::thunk: Null response encountered!");
+                    continue;
+                }
+                if (!response->text.empty()) {
+                    if (!npcResponse.empty()) {
+                        npcResponse += " ";
+                    }
+                    npcResponse += response->text.c_str();
+                } else {
+                    RE::DebugNotification("ShowSubtitle::thunk: Response text is empty!");
+                }
+            }
+
+            // Cast speaker to Actor* so we can get an NPC name.
+            auto actor = skyrim_cast<RE::Actor*>(a_speaker);
+            if (!actor) {
+                // If the speaker is not an actor, bail.
+                RE::DebugNotification("ShowSubtitle::thunk: a_speaker is not an Actor!");
+                return;
+            }
+
+            // Get the player's name; fall back to "Player" if something is off.
+            auto player = RE::PlayerCharacter::GetSingleton();
+            const char* playerName = "Player";
+            if (player && player->GetActorBase()) {
+                if (auto name = player->GetActorBase()->GetName(); name && name[0] != '\0') {
+                    playerName = name;
+                }
+            }
+
+            // Construct the event strings.
+            std::string playerEvent = std::string(playerName) + ": " + currentPlayerTopicText;
+            std::string npcEvent = std::string(actor->GetName()) + ": " + npcResponse;
+
+            // Fire SKSE events
+            AddMantellaEvent(playerEvent.c_str());
+            AddMantellaEvent(npcEvent.c_str());
+
+            // Remember this player topic so we don't process it again.
+            UpdateLastPlayerTopicText(currentPlayerTopicText);
         }
 
-        // Original function pointer
+        // Original function pointer, set by write_thunk_call.
         static inline REL::Relocation<decltype(thunk)> func;
 
         // ----------------------------------------------------------------------------
-        // Install hook
+        // Installation function: writes our thunk calls to the target addresses
         // ----------------------------------------------------------------------------
         static void Install() {
+            // List of targets where we need to patch in our thunk
             std::array targets{
                 std::make_pair(RELOCATION_ID(19119, 19521), 0x2B2),
                 std::make_pair(RELOCATION_ID(36543, 37544), OFFSET(0x8EC, 0x8C2)),
             };
+
             for (auto& [id, offset] : targets) {
                 REL::Relocation<std::uintptr_t> target(id, offset);
                 stl::write_thunk_call<ShowSubtitle>(target.address());
@@ -106,6 +133,7 @@ namespace Hooks {
         }
     };
 }
+
 
 // Typical SKSE entry point
 SKSEPluginLoad(const SKSE::LoadInterface* skse) {
