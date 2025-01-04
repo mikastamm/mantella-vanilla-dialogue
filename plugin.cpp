@@ -1,10 +1,34 @@
 #include "PCH.h"
+#include "logger.h" 
 
 namespace Hooks {
+    struct MantellaDialogueTracker {
+        inline static RE::BGSListForm* aParticipants;
+        inline static bool DialogueTrackerHasError = false;
+        const char* ConversationParticipantsFormId = "";
+
+        static void Setup() {
+            auto dataHandler = RE::TESDataHandler::GetSingleton();
+            if (!dataHandler) {
+                logger::error("MantellaDialogueTracker::Setup: TESDataHandler is null!");
+                DialogueTrackerHasError = true;
+                return;
+            }
+            aParticipants = dataHandler->LookupForm<RE::BGSListForm>(0xE4537, "Mantella.esp");
+            if (!aParticipants) {
+                logger::error("MantellaDialogueTracker::Setup: aParticipants is null!");
+                DialogueTrackerHasError = true;
+                return;
+            }
+
+        };
+    };
+
     struct ShowSubtitle {
         // Holds the last processed player's topic text so we don't process duplicates.
-        static inline std::string s_lastPlayerTopicText{};
-
+        inline static std::string s_lastPlayerTopicText{};
+        const char* ConversatioStartedEvent = "ConversationStarted";
+        const char* ConversationEndedEvent = "ConversationEnded";
         // ----------------------------------------------------------------------------
         // 1) Check function: determines if the topic has already been processed
         // ----------------------------------------------------------------------------
@@ -44,7 +68,7 @@ namespace Hooks {
 
             auto topicManager = RE::MenuTopicManager::GetSingleton();
             if (!topicManager) {
-                RE::DebugNotification("ShowSubtitle::thunk: MenuTopicManager is null!");
+                logger::error("ShowSubtitle::thunk: MenuTopicManager is null!");
                 return;
             }
 
@@ -79,9 +103,7 @@ namespace Hooks {
                         npcResponse += " ";
                     }
                     npcResponse += response->text.c_str();
-                } else {
-                    RE::DebugNotification("ShowSubtitle::thunk: Response text is empty!");
-                }
+                } 
             }
 
             // Cast speaker to Actor* so we can get an NPC name.
@@ -107,6 +129,7 @@ namespace Hooks {
 
             // Fire SKSE events
             AddMantellaEvent(playerEvent.c_str());
+            if (!npcEvent.empty())
             AddMantellaEvent(npcEvent.c_str());
 
             // Remember this player topic so we don't process it again.
@@ -138,7 +161,7 @@ namespace Hooks {
 // Typical SKSE entry point
 SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     SKSE::Init(skse);
-
+    SetupLog();
     Hooks::ShowSubtitle::Install();
     return true;
 }
