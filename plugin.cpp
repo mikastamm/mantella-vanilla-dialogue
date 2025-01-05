@@ -10,6 +10,7 @@
 using json = nlohmann::json;
 
 // Ensure you have included spdlog in your project and initialized it in logger.h/cpp
+static void MDebugNotification(const char* a_notification) { RE::DebugNotification(a_notification); }
 
 namespace Hooks {
     // -------------------------------------------------------------------------
@@ -149,7 +150,6 @@ namespace Hooks {
             if (!concatenatedLines.empty() && concatenatedLines.back() == ' ') {
                 concatenatedLines.pop_back();
             }
-
             // Send a single Mantella event with the concatenated lines
             if (!concatenatedLines.empty()) {
                 SKSE::ModCallbackEvent modEvent{"MantellaAddEvent", concatenatedLines.c_str()};
@@ -163,6 +163,7 @@ namespace Hooks {
 
             // Erase the processed entry from dialogue history
             s_dialogueHistory.erase(dialogueLineIterator);
+            MDebugNotification("Actor had captured dialogue. Sent it to mantella");
             logger::info("SendAndDiscardCapturedDialogue: Removed processed dialogue from history.");
         }
 
@@ -255,7 +256,7 @@ namespace Hooks {
 
             std::string playerEvent = std::string(playerName) + ": " + currentPlayerTopicText;
             std::string npcEvent = "";
-            if (!npcResponse.empty()) npcEvent = std::string(actor->GetName()) + ": " + npcResponse;
+            if (!npcResponse.empty()) npcEvent = std::string(actor->GetDisplayFullName()) + ": " + npcResponse;
 
             // Placeholder: Force "OnConversationStarted" each time a new line is processed.
             MantellaDialogueTracker::OnConversationStarted();
@@ -276,6 +277,8 @@ namespace Hooks {
                     auto formID = actor->GetFormID();
                     MantellaDialogueTracker::s_dialogueHistory[formID].push_back(newLine);
                     logger::info("Stored dialogue for FormID %u in s_dialogueHistory.", formID);
+                    MDebugNotification("No Conv, Stored line");
+
                 }
                 // Fire events even if conversation not running
                 AddMantellaEvent(playerEvent.c_str());
@@ -289,6 +292,7 @@ namespace Hooks {
                     if (!npcEvent.empty()) AddMantellaEvent(npcEvent.c_str());
 
                 } else {
+
                     // Special case: speaker is not in participants,
                     // but conversation is running with others.
                     // Broadcast to all participants + store for possible future use
@@ -299,6 +303,8 @@ namespace Hooks {
                         auto formID = actor->GetFormID();
                         MantellaDialogueTracker::s_dialogueHistory[formID].push_back(newLine);
                         logger::info("Stored dialogue for FormID %u in s_dialogueHistory.", formID);
+                        MDebugNotification("Not in convo: nLines:" + MantellaDialogueTracker::s_dialogueHistory[formID].size());
+
                     }
                 }
             }
@@ -353,6 +359,9 @@ bool DeserializeDialogueHistoryFromJSON(const std::string& jsonString) {
             std::vector<Hooks::DialogueLine> dialogueLines = it.value().get<std::vector<Hooks::DialogueLine>>();
             Hooks::MantellaDialogueTracker::s_dialogueHistory.emplace(formID, std::move(dialogueLines));
         }
+        MDebugNotification(("Loaded " + std::to_string(Hooks::MantellaDialogueTracker::s_dialogueHistory.size()) +
+                           " actors with pending lines")
+                              .c_str());
 
         logger::info("Deserialized dialogue history with %zu entries.",
                      Hooks::MantellaDialogueTracker::s_dialogueHistory.size());
@@ -438,6 +447,7 @@ void MyRevertCallback(SKSE::SerializationInterface*) {
     Hooks::MantellaDialogueTracker::s_dialogueHistory.clear();
     logger::info("MyRevertCallback: Cleared dialogue history.");
 }
+
 
 // -----------------------------------------------------------------------------
 // SKSE Messaging Interface Listener
