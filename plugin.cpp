@@ -466,45 +466,6 @@ void OnSKSEMessage(SKSE::MessagingInterface::Message* a_msg) {
 }
 
 
-// -----------------------------------------------------------------------------
-// Process and Send Dialogue Function
-// -----------------------------------------------------------------------------
-
-void SendAndDiscardCapturedDialogue(std::map<RE::FormID, std::vector<Hooks::DialogueLine>>::iterator it) {
-    if (it == Hooks::MantellaDialogueTracker::s_dialogueHistory.end()) {
-        logger::warn("SendAndDiscardCapturedDialogue: Invalid iterator provided.");
-        return;
-    }
-
-    // Concatenate all lines into a single string
-    std::string concatenatedLines;
-
-    for (auto& line : it->second) {
-        // Concatenate the player query and NPC response separated by a semicolon
-        concatenatedLines += line.playerQuery + "; " + line.npcResponse + " ";
-    }
-
-    // Remove the trailing space, if any
-    if (!concatenatedLines.empty() && concatenatedLines.back() == ' ') {
-        concatenatedLines.pop_back();
-    }
-
-    // Send a single Mantella event with the concatenated lines
-    if (!concatenatedLines.empty()) {
-        SKSE::ModCallbackEvent modEvent{"MantellaAddEvent", concatenatedLines.c_str()};
-        if (auto source = SKSE::GetModCallbackEventSource(); source) {
-            source->SendEvent(&modEvent);
-            logger::info("Sent MantellaAddEvent with concatenated dialogue.");
-        } else {
-            logger::error("SendAndDiscardCapturedDialogue: ModCallbackEventSource is null!");
-        }
-    }
-
-    // Erase the processed entry from dialogue history
-    Hooks::MantellaDialogueTracker::s_dialogueHistory.erase(it);
-    logger::info("SendAndDiscardCapturedDialogue: Removed processed dialogue from history.");
-}
-
 // Typical SKSE entry point
 SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     SKSE::Init(skse);
