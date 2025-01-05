@@ -67,7 +67,10 @@ namespace Hooks {
 
             // If the form list has at least one actor, treat it as "conversation is running."
             // (Adjust as you see fit.)
-            return !aParticipants->scriptAddedTempForms->empty();
+            auto scriptAddedForms = aParticipants->scriptAddedTempForms;
+            if (!scriptAddedForms) return false;
+          
+            return !scriptAddedForms->empty();
         }
 
         // ---------------------------------------------------------------------
@@ -79,8 +82,9 @@ namespace Hooks {
             if (!a_actor || !aParticipants || DialogueTrackerHasError) return false;
 
             auto formID = a_actor->GetFormID();
-
-            for (auto& actorInConvFormId : *aParticipants->scriptAddedTempForms) {
+            auto scriptAddedForms = aParticipants->scriptAddedTempForms;
+            if (!scriptAddedForms) return false;
+            for (auto& actorInConvFormId : *scriptAddedForms) {
                 if (actorInConvFormId == formID) return true;
             }
             return false;
@@ -97,7 +101,10 @@ namespace Hooks {
             s_lastParticipants.clear();
 
             // For each form in the participants, replay old lines if any
-            for (auto& formID : *aParticipants->scriptAddedTempForms) {
+            auto scriptAddedForms = aParticipants->scriptAddedTempForms;
+            if (!scriptAddedForms) return;
+
+            for (auto& formID : *scriptAddedForms) {
                 
                 s_lastParticipants.insert(formID);
 
@@ -105,22 +112,45 @@ namespace Hooks {
                 auto it = s_dialogueHistory.find(formID);
                 if (it == s_dialogueHistory.end()) continue;
 
-                // Replay those lines. For example:
-                for (auto& line : it->second) {
-                    // Fire Mantella events or do your logic to pass them in
-                    SKSE::ModCallbackEvent modEventA{"MantellaAddEvent",
-                                                     (std::string("Replay - ") + line.playerQuery).c_str()};
-                    if (auto source = SKSE::GetModCallbackEventSource(); source) source->SendEvent(&modEventA);
-
-                    SKSE::ModCallbackEvent modEventB{"MantellaAddEvent",
-                                                     (std::string("Replay - ") + line.npcResponse).c_str()};
-                    if (auto source = SKSE::GetModCallbackEventSource(); source) source->SendEvent(&modEventB);
-                }
-
-                // Once replayed, remove them
-                s_dialogueHistory.erase(it);
+                SendAndDiscardCapturedDialogue(it);
             }
         }
+
+        // Sends the dialogue that was captured when not in a conversation to Mantella and removes it from the backlog
+       static void SendAndDiscardCapturedDialogue(std::map<RE::FormID, std::vector<DialogueLine>>::iterator dialogueLineIterator) {
+            if (dialogueLineIterator == s_dialogueHistory.end()) {
+                logger::warn("ProcessAndSendDialogue: Invalid iterator provided.");
+                return;
+            }
+
+            // Concatenate all lines into a single string
+            std::string concatenatedLines;
+
+            for (auto& line : dialogueLineIterator->second) {
+                // Concatenate the player query and NPC response for each line
+                concatenatedLines += line.playerQuery + "; " + line.npcResponse + " ";
+            }
+
+            // Remove the trailing space, if any
+            if (!concatenatedLines.empty() && concatenatedLines.back() == ' ') {
+                concatenatedLines.pop_back();
+            }
+
+            // Send a single Mantella event with the concatenated lines
+            if (!concatenatedLines.empty()) {
+                SKSE::ModCallbackEvent modEvent{"MantellaAddEvent", concatenatedLines.c_str()};
+                if (auto source = SKSE::GetModCallbackEventSource(); source) {
+                    source->SendEvent(&modEvent);
+                } else {
+                    logger::error("ProcessAndSendDialogue: ModCallbackEventSource is null!");
+                }
+            }
+
+            // Erase the processed entry from dialogue history
+            s_dialogueHistory.erase(dialogueLineIterator);
+            logger::info("ProcessAndSendDialogue: Removed processed dialogue from history.");
+        }
+
 
         // ---------------------------------------------------------------------
         // **PLACEHOLDER**: Called if a new participant joins mid-conversation.
@@ -133,18 +163,7 @@ namespace Hooks {
             auto it = s_dialogueHistory.find(newFormID);
             if (it == s_dialogueHistory.end()) return;
 
-            // Replay the lines
-            for (auto& line : it->second) {
-                SKSE::ModCallbackEvent modEventA{"MantellaAddEvent",
-                                                 (std::string("Replay - ") + line.playerQuery).c_str()};
-                if (auto source = SKSE::GetModCallbackEventSource(); source) source->SendEvent(&modEventA);
-
-                SKSE::ModCallbackEvent modEventB{"MantellaAddEvent",
-                                                 (std::string("Replay - ") + line.npcResponse).c_str()};
-                if (auto source = SKSE::GetModCallbackEventSource(); source) source->SendEvent(&modEventB);
-            }
-            // Remove them once replayed
-            s_dialogueHistory.erase(it);
+            SendAndDiscardCapturedDialogue(it);
         }
     };
 
