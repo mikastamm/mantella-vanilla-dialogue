@@ -1,8 +1,15 @@
-#include <map>  // For std::map or std::unordered_map, whichever you prefer
-#include <set>  // We use std::set instead of std::unordered_set
+#include <cstdint>  // For fixed-width integer types
+#include <map>      // For std::map
+#include <set>      // For std::set
+#include <string>   // For std::string
+#include <vector>   // For std::vector
 
 #include "PCH.h"
+#include "json.h"  // Include nlohmann/json library
 #include "logger.h"
+using json = nlohmann::json;
+
+// Ensure you have included spdlog in your project and initialized it in logger.h/cpp
 
 namespace Hooks {
     // -------------------------------------------------------------------------
@@ -12,12 +19,25 @@ namespace Hooks {
     struct DialogueLine {
         std::string playerQuery;
         std::string npcResponse;
-        float gameTimeHours;  // e.g. from RE::Calendar::GetSingleton()->GetHoursPassed()
+        float gameTimeHours;  // e.g., from RE::Calendar::GetSingleton()->GetHoursPassed()
     };
 
+    // Serialize DialogueLine to JSON
+    inline void to_json(json& j, const DialogueLine& line) {
+        j = json{{"playerQuery", line.playerQuery},
+                 {"npcResponse", line.npcResponse},
+                 {"gameTimeHours", line.gameTimeHours}};
+    }
+
+    // Deserialize DialogueLine from JSON
+    inline void from_json(const json& j, DialogueLine& line) {
+        j.at("playerQuery").get_to(line.playerQuery);
+        j.at("npcResponse").get_to(line.npcResponse);
+        j.at("gameTimeHours").get_to(line.gameTimeHours);
+    }
+
     // -------------------------------------------------------------------------
-    // A simple helper to fetch current game time in hours. You can adjust to
-    // whatever granularity you need (days, hours, etc.).
+    // A simple helper to fetch current game time in hours.
     // -------------------------------------------------------------------------
     static float GetCurrentGameTimeHours() {
         auto calendar = RE::Calendar::GetSingleton();
@@ -31,8 +51,6 @@ namespace Hooks {
     // - stores unsent dialogue lines in a map keyed by Actor form ID
     // -------------------------------------------------------------------------
     struct MantellaDialogueTracker {
-        // If your environment does not support std::unordered_map, you can use std::map.
-        // We’ll assume at least std::map is available.
         static inline RE::BGSListForm* aParticipants;
         static inline bool DialogueTrackerHasError = false;
 
@@ -64,12 +82,9 @@ namespace Hooks {
         static bool IsConversationRunning() {
             if (!aParticipants || DialogueTrackerHasError) return false;
 
-
-            // If the form list has at least one actor, treat it as "conversation is running."
-            // (Adjust as you see fit.)
             auto scriptAddedForms = aParticipants->scriptAddedTempForms;
             if (!scriptAddedForms) return false;
-          
+
             return !scriptAddedForms->empty();
         }
 
@@ -91,13 +106,12 @@ namespace Hooks {
         }
 
         // ---------------------------------------------------------------------
-        // **PLACEHOLDER**: Called when a conversation starts. In a future version,
-        // you might have an actual SKSE or Mantella event for conversation start.
+        // Called when a conversation starts.
         // ---------------------------------------------------------------------
         static void OnConversationStarted() {
             if (DialogueTrackerHasError || !aParticipants) return;
 
-            // In case you want to re-check participants, do so here
+            // Clear previous participants
             s_lastParticipants.clear();
 
             // For each form in the participants, replay old lines if any
@@ -105,7 +119,6 @@ namespace Hooks {
             if (!scriptAddedForms) return;
 
             for (auto& formID : *scriptAddedForms) {
-                
                 s_lastParticipants.insert(formID);
 
                 // See if we have stored lines for this participant
@@ -117,9 +130,10 @@ namespace Hooks {
         }
 
         // Sends the dialogue that was captured when not in a conversation to Mantella and removes it from the backlog
-       static void SendAndDiscardCapturedDialogue(std::map<RE::FormID, std::vector<DialogueLine>>::iterator dialogueLineIterator) {
+        static void SendAndDiscardCapturedDialogue(
+            std::map<RE::FormID, std::vector<DialogueLine>>::iterator dialogueLineIterator) {
             if (dialogueLineIterator == s_dialogueHistory.end()) {
-                logger::warn("ProcessAndSendDialogue: Invalid iterator provided.");
+                logger::warn("SendAndDiscardCapturedDialogue: Invalid iterator provided.");
                 return;
             }
 
@@ -127,7 +141,7 @@ namespace Hooks {
             std::string concatenatedLines;
 
             for (auto& line : dialogueLineIterator->second) {
-                // Concatenate the player query and NPC response for each line
+                // Concatenate the player query and NPC response separated by a semicolon
                 concatenatedLines += line.playerQuery + "; " + line.npcResponse + " ";
             }
 
@@ -141,20 +155,19 @@ namespace Hooks {
                 SKSE::ModCallbackEvent modEvent{"MantellaAddEvent", concatenatedLines.c_str()};
                 if (auto source = SKSE::GetModCallbackEventSource(); source) {
                     source->SendEvent(&modEvent);
+                    logger::info("Sent MantellaAddEvent with concatenated dialogue.");
                 } else {
-                    logger::error("ProcessAndSendDialogue: ModCallbackEventSource is null!");
+                    logger::error("SendAndDiscardCapturedDialogue: ModCallbackEventSource is null!");
                 }
             }
 
             // Erase the processed entry from dialogue history
             s_dialogueHistory.erase(dialogueLineIterator);
-            logger::info("ProcessAndSendDialogue: Removed processed dialogue from history.");
+            logger::info("SendAndDiscardCapturedDialogue: Removed processed dialogue from history.");
         }
 
-
         // ---------------------------------------------------------------------
-        // **PLACEHOLDER**: Called if a new participant joins mid-conversation.
-        // You can implement this once you have the actual event from Mantella.
+        // Called if a new participant joins mid-conversation.
         // ---------------------------------------------------------------------
         static void OnNewParticipant(RE::Actor* a_newActor) {
             if (!a_newActor || DialogueTrackerHasError) return;
@@ -180,10 +193,10 @@ namespace Hooks {
         static bool HasAlreadyProcessed(std::string_view a_topicText) { return a_topicText == s_lastPlayerTopicText; }
 
         static void UpdateLastPlayerTopicText(std::string_view a_topicText) {
-            s_lastPlayerTopicText = a_topicText.data();
+            s_lastPlayerTopicText = std::string(a_topicText);
         }
 
-        // Fire an event to Mantella (unchanged from your example)
+        // Fire an event to Mantella
         static void AddMantellaEvent(const char* a_event) {
             SKSE::ModCallbackEvent modEvent{"MantellaAddEvent", a_event};
             if (auto modCallbackSource = SKSE::GetModCallbackEventSource(); modCallbackSource)
@@ -243,12 +256,8 @@ namespace Hooks {
             std::string playerEvent = std::string(playerName) + ": " + currentPlayerTopicText;
             std::string npcEvent = "";
             if (!npcResponse.empty()) npcEvent = std::string(actor->GetName()) + ": " + npcResponse;
-            
-            // -------------------------------
-            // Placeholder:
-            // Force "OnConversationStarted" each time a new line is processed.
-            // In future, replace this with your real event-based approach.
-            // -------------------------------
+
+            // Placeholder: Force "OnConversationStarted" each time a new line is processed.
             MantellaDialogueTracker::OnConversationStarted();
 
             // Are we in a conversation?
@@ -266,9 +275,9 @@ namespace Hooks {
                 if (!MantellaDialogueTracker::DialogueTrackerHasError) {
                     auto formID = actor->GetFormID();
                     MantellaDialogueTracker::s_dialogueHistory[formID].push_back(newLine);
+                    logger::info("Stored dialogue for FormID %u in s_dialogueHistory.", formID);
                 }
-                // If you still want to fire events (knowing they'll be ignored by Mantella),
-                // you can do so:
+                // Fire events even if conversation not running
                 AddMantellaEvent(playerEvent.c_str());
                 if (!npcEvent.empty()) AddMantellaEvent(npcEvent.c_str());
 
@@ -289,6 +298,7 @@ namespace Hooks {
                     if (!MantellaDialogueTracker::DialogueTrackerHasError) {
                         auto formID = actor->GetFormID();
                         MantellaDialogueTracker::s_dialogueHistory[formID].push_back(newLine);
+                        logger::info("Stored dialogue for FormID %u in s_dialogueHistory.", formID);
                     }
                 }
             }
@@ -310,17 +320,189 @@ namespace Hooks {
             for (auto& [id, offset] : targets) {
                 REL::Relocation<std::uintptr_t> target(id, offset);
                 stl::write_thunk_call<ShowSubtitle>(target.address());
+                logger::info("Installed ShowSubtitle hook at address: {:x}", target.address());
             }
         }
     };
 
 }  // namespace Hooks
 
+// -----------------------------------------------------------------------------
+// JSON Serialization and Deserialization Functions
+// -----------------------------------------------------------------------------
+
+// Serialize dialogue history to JSON string
+std::string SerializeDialogueHistoryToJSON() {
+    json j;
+
+    for (const auto& [formID, dialogueLines] : Hooks::MantellaDialogueTracker::s_dialogueHistory) {
+        j[std::to_string(formID)] = dialogueLines;
+    }
+
+    return j.dump();  // Convert JSON object to string
+}
+
+// Deserialize dialogue history from JSON string
+bool DeserializeDialogueHistoryFromJSON(const std::string& jsonString) {
+    try {
+        json j = json::parse(jsonString);
+        Hooks::MantellaDialogueTracker::s_dialogueHistory.clear();
+
+        for (auto it = j.begin(); it != j.end(); ++it) {
+            RE::FormID formID = static_cast<RE::FormID>(std::stoul(it.key()));
+            std::vector<Hooks::DialogueLine> dialogueLines = it.value().get<std::vector<Hooks::DialogueLine>>();
+            Hooks::MantellaDialogueTracker::s_dialogueHistory.emplace(formID, std::move(dialogueLines));
+        }
+
+        logger::info("Deserialized dialogue history with %zu entries.",
+                     Hooks::MantellaDialogueTracker::s_dialogueHistory.size());
+        return true;
+    } catch (const json::parse_error& e) {
+        logger::error("Failed to parse dialogue history JSON: %s", e.what());
+        return false;
+    } catch (const std::exception& e) {
+        logger::error("Exception during deserialization: %s", e.what());
+        return false;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SKSE Serialization Callbacks
+// -----------------------------------------------------------------------------
+
+constexpr std::uint32_t kSerializationID = 'MTDL';  // 4-byte unique plugin signature
+
+// Save Callback
+void MySaveCallback(SKSE::SerializationInterface* a_intfc) {
+    // Serialize dialogue history to JSON string
+    std::string jsonString = SerializeDialogueHistoryToJSON();
+
+    // Open a record with type 'HIST' and version 1
+    constexpr std::uint32_t recordType = 'HIST';  // Unique 4-byte identifier for dialogue history
+    constexpr std::uint32_t version = 1;
+
+    if (!a_intfc->OpenRecord(recordType, version)) {
+        logger::error("MySaveCallback: Failed to open 'HIST' record for serialization.");
+        return;
+    }
+
+    // Write the length of the JSON string as a 32-bit unsigned integer
+    std::uint32_t jsonLength = static_cast<std::uint32_t>(jsonString.size());
+    if (!a_intfc->WriteRecordData(&jsonLength, sizeof(jsonLength))) {
+        logger::error("MySaveCallback: Failed to write JSON string length.");
+        return;
+    }
+
+    // Write the JSON string data
+    if (!a_intfc->WriteRecordData(jsonString.c_str(), jsonLength)) {
+        logger::error("MySaveCallback: Failed to write JSON string data.");
+        return;
+    }
+
+    logger::info("MySaveCallback: Serialized dialogue history to SKSE co-save.");
+}
+
+// Load Callback
+void MyLoadCallback(SKSE::SerializationInterface* a_intfc) {
+    std::uint32_t type, version, length;
+    while (a_intfc->GetNextRecordInfo(type, version, length)) {
+        if (type != 'HIST') {
+            continue;
+        }
+
+        // Read the length of the JSON string
+        std::uint32_t jsonLength = 0;
+        if (a_intfc->ReadRecordData(&jsonLength, sizeof(jsonLength)) != sizeof(jsonLength)) {
+            logger::error("MyLoadCallback: Failed to read JSON string length.");
+            continue;
+        }
+
+        // Read the JSON string data
+        std::string jsonString(jsonLength, '\0');
+        if (a_intfc->ReadRecordData(&jsonString[0], jsonLength) != jsonLength) {
+            logger::error("MyLoadCallback: Failed to read JSON string data.");
+            continue;
+        }
+
+        // Deserialize JSON string into dialogue history
+        if (DeserializeDialogueHistoryFromJSON(jsonString)) {
+            logger::info("MyLoadCallback: Successfully loaded dialogue history from SKSE co-save.");
+        } else {
+            logger::error("MyLoadCallback: Failed to deserialize dialogue history from JSON.");
+        }
+    }
+}
+
+// Revert Callback
+void MyRevertCallback(SKSE::SerializationInterface*) {
+    Hooks::MantellaDialogueTracker::s_dialogueHistory.clear();
+    logger::info("MyRevertCallback: Cleared dialogue history.");
+}
+
+// -----------------------------------------------------------------------------
+// SKSE Messaging Interface Listener
+// -----------------------------------------------------------------------------
+
 void OnSKSEMessage(SKSE::MessagingInterface::Message* a_msg) {
     if (a_msg->type == SKSE::MessagingInterface::kDataLoaded) {
         // Setup the Mantella tracker
         Hooks::MantellaDialogueTracker::Setup();
     }
+    if (a_msg->type == SKSE::MessagingInterface::kPostLoad) {
+        // Register your plugin's serialization callbacks
+        auto serialization = SKSE::GetSerializationInterface();
+        if (!serialization) {
+            logger::error("OnSKSEMessage: Failed to get SKSE Serialization Interface.");
+            return;
+        }
+
+        serialization->SetUniqueID(kSerializationID);  // 'MTDL'
+        serialization->SetSaveCallback(MySaveCallback);
+        serialization->SetLoadCallback(MyLoadCallback);
+        serialization->SetRevertCallback(MyRevertCallback);
+
+        logger::info("OnSKSEMessage: Registered SKSE Serialization callbacks for dialogue history.");
+    }
+}
+
+
+// -----------------------------------------------------------------------------
+// Process and Send Dialogue Function
+// -----------------------------------------------------------------------------
+
+void SendAndDiscardCapturedDialogue(std::map<RE::FormID, std::vector<Hooks::DialogueLine>>::iterator it) {
+    if (it == Hooks::MantellaDialogueTracker::s_dialogueHistory.end()) {
+        logger::warn("SendAndDiscardCapturedDialogue: Invalid iterator provided.");
+        return;
+    }
+
+    // Concatenate all lines into a single string
+    std::string concatenatedLines;
+
+    for (auto& line : it->second) {
+        // Concatenate the player query and NPC response separated by a semicolon
+        concatenatedLines += line.playerQuery + "; " + line.npcResponse + " ";
+    }
+
+    // Remove the trailing space, if any
+    if (!concatenatedLines.empty() && concatenatedLines.back() == ' ') {
+        concatenatedLines.pop_back();
+    }
+
+    // Send a single Mantella event with the concatenated lines
+    if (!concatenatedLines.empty()) {
+        SKSE::ModCallbackEvent modEvent{"MantellaAddEvent", concatenatedLines.c_str()};
+        if (auto source = SKSE::GetModCallbackEventSource(); source) {
+            source->SendEvent(&modEvent);
+            logger::info("Sent MantellaAddEvent with concatenated dialogue.");
+        } else {
+            logger::error("SendAndDiscardCapturedDialogue: ModCallbackEventSource is null!");
+        }
+    }
+
+    // Erase the processed entry from dialogue history
+    Hooks::MantellaDialogueTracker::s_dialogueHistory.erase(it);
+    logger::info("SendAndDiscardCapturedDialogue: Removed processed dialogue from history.");
 }
 
 // Typical SKSE entry point
@@ -328,13 +510,16 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     SKSE::Init(skse);
     SetupLog();
 
-      if (auto messaging = SKSE::GetMessagingInterface()) {
+    if (auto messaging = SKSE::GetMessagingInterface()) {
         messaging->RegisterListener("SKSE", OnSKSEMessage);
+        logger::info("SKSEPluginLoad: Registered SKSE messaging listener.");
     } else {
-        logger::error("Failed to get SKSE Messaging Interface!");
+        logger::error("SKSEPluginLoad: Failed to get SKSE Messaging Interface!");
     }
 
     // Hook subtitles
     Hooks::ShowSubtitle::Install();
+    logger::info("SKSEPluginLoad: Installed ShowSubtitle hook.");
+
     return true;
 }
