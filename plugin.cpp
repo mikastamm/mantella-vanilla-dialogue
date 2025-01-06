@@ -37,6 +37,38 @@ namespace Hooks {
         j.at("gameTimeHours").get_to(line.gameTimeHours);
     }
 
+        bool IsGreeting(std::string msg) {
+        std::string greetings[] = {"Hello", "CYRGenericHello"};
+        for (std::string greeting : greetings) {
+            if (msg == greeting) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // -----------------------------------------------------------------------------
+    // Configuration
+    // -----------------------------------------------------------------------------
+
+    struct Configuration {
+        bool FilterShortReplies;
+        bool FilterNonUniqueGreetings;
+        // Filter query-response pairs where response is in this list
+        std::vector<std::string> NPCLineBlacklist;
+        // Filter query-response pairs where query is in this list
+        std::vector<std::string> PlayerLineBlacklist;
+    };
+    Configuration config;
+
+    void loadConfiguration() {
+        // TODO: Load from ini file or settings ui
+        config.FilterShortReplies = true;
+        config.FilterNonUniqueGreetings = true;
+        config.NPCLineBlacklist = {"Can I help you?", "Farewell", "See you later"};
+        config.PlayerLineBlacklist = {"Stage1Hello", "I want you to.."};
+    }
+
     // -------------------------------------------------------------------------
     // A simple helper to fetch current game time in hours.
     // -------------------------------------------------------------------------
@@ -229,6 +261,17 @@ namespace Hooks {
                 return;
             }
 
+            if (dialogue->parentTopicInfo)
+            {
+                if (config.FilterNonUniqueGreetings && IsGreeting(dialogue->topicText.c_str()) && !dialogue->parentTopicInfo->saidOnce)
+                {
+                    // Dont send greetings to mantella to prevent spamming the model with generic lines
+                    MDebugNotification("Filtered Greeting");
+                    return;
+                }
+            } else
+                RE::DebugNotification("Parent Topic Info is null");
+
             // Skip if we've processed this text before
             if (HasAlreadyProcessed(currentPlayerTopicText)) return;
 
@@ -331,6 +374,7 @@ namespace Hooks {
         }
     };
 
+
 }  // namespace Hooks
 
 // -----------------------------------------------------------------------------
@@ -374,6 +418,8 @@ bool DeserializeDialogueHistoryFromJSON(const std::string& jsonString) {
         return false;
     }
 }
+
+
 
 // -----------------------------------------------------------------------------
 // SKSE Serialization Callbacks
