@@ -232,12 +232,26 @@ namespace Hooks {
         }
 
         // Fire an event to Mantella
-        static void AddMantellaEvent(const char* a_event) {
+        static void AddMantellaEventX(const char* a_event) {
             SKSE::ModCallbackEvent modEvent{"MantellaAddEvent", a_event};
             if (auto modCallbackSource = SKSE::GetModCallbackEventSource(); modCallbackSource)
                 modCallbackSource->SendEvent(&modEvent);
             else
                 RE::DebugNotification("AddMantellaEvent: No ModCallbackEventSource found!");
+        }
+
+        static void AddMantellaEvent(std::string msg) {
+            auto targetFunction = "AddIngameEvent";
+            auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
+            auto mantellaQuest = RE::TESDataHandler::GetSingleton()->LookupForm<RE::TESQuest>(0x03D41A, "Mantella.esp");
+            auto questHandle = vm->GetObjectHandlePolicy()->GetHandleForObject(mantellaQuest->GetFormType(), mantellaQuest);
+            RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
+            RE::BSTSmartPointer<RE::BSScript::Object> script = nullptr;
+            if (vm->FindBoundObject(questHandle, "MantellaConversation", script))
+            {
+                auto args = RE::MakeFunctionArguments(std::move(msg));
+                vm->DispatchMethodCall1(script, targetFunction, args, callback);
+            }
         }
 
         // The hook function
@@ -529,6 +543,7 @@ void OnSKSEMessage(SKSE::MessagingInterface::Message* a_msg) {
 SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     SKSE::Init(skse);
     SetupLog();
+    Hooks::loadConfiguration();
 
     if (auto messaging = SKSE::GetMessagingInterface()) {
         messaging->RegisterListener("SKSE", OnSKSEMessage);
@@ -536,7 +551,6 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     } else {
         logger::error("SKSEPluginLoad: Failed to get SKSE Messaging Interface!");
     }
-
     // Hook subtitles
     Hooks::ShowSubtitle::Install();
     logger::info("SKSEPluginLoad: Installed ShowSubtitle hook.");
