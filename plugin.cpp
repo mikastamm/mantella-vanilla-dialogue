@@ -52,6 +52,7 @@ namespace Hooks {
     // -----------------------------------------------------------------------------
 
     struct Configuration {
+        bool ShouldAddDialogueToMantella;
         bool FilterShortReplies;
         bool FilterNonUniqueGreetings;
         // Filter query-response pairs where response is in this list
@@ -63,6 +64,7 @@ namespace Hooks {
 
     void loadConfiguration() {
         // TODO: Load from ini file or settings ui
+        config.ShouldAddDialogueToMantella = true;
         config.FilterShortReplies = true;
         config.FilterNonUniqueGreetings = true;
         config.NPCLineBlacklist = {"Can I help you?", "Farewell", "See you later"};
@@ -244,6 +246,7 @@ namespace Hooks {
             // Call original
             func(a_this, a_speaker, a_subtitle, a_alwaysDisplay);
 
+            if (!config.ShouldAddDialogueToMantella) return;
             if (!a_speaker) return;
 
             auto topicManager = RE::MenuTopicManager::GetSingleton();
