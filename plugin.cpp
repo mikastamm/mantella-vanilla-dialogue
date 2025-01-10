@@ -4,40 +4,47 @@
 #include <string>   // For std::string
 #include <vector>   // For std::vector
 
+#include "MantellaPapyrusInterface.h"
+#include "MantellaServerInterface.h"
 #include "PCH.h"
 #include "json.h"  // Include nlohmann/json library
 #include "logger.h"
+
 using json = nlohmann::json;
 
 // Ensure you have included spdlog in your project and initialized it in logger.h/cpp
 static void MDebugNotification(const char* a_notification) { RE::DebugNotification(a_notification); }
+int port;
+MantellaServerInterface serverInterface;
 
 namespace Hooks {
+
     // -------------------------------------------------------------------------
     // A small POD struct to store a single exchange: player's line, NPC's line,
     // and the Skyrim in-game time at which it was recorded.
     // -------------------------------------------------------------------------
     struct DialogueLine {
-        std::string playerQuery;
-        std::string npcResponse;
-        float gameTimeHours;  // e.g., from RE::Calendar::GetSingleton()->GetHoursPassed()
+        std::string playerLine;
+        std::string playerName;
+        std::string npcLine;
+        std::string npcName;
+        float gameTimeHours;
     };
 
     // Serialize DialogueLine to JSON
     inline void to_json(json& j, const DialogueLine& line) {
-        j = json{{"playerQuery", line.playerQuery},
-                 {"npcResponse", line.npcResponse},
-                 {"gameTimeHours", line.gameTimeHours}};
+        j = json{
+            {"playerQuery", line.playerLine}, {"npcResponse", line.npcLine}, {"gameTimeHours", line.gameTimeHours}};
     }
 
     // Deserialize DialogueLine from JSON
     inline void from_json(const json& j, DialogueLine& line) {
-        j.at("playerQuery").get_to(line.playerQuery);
-        j.at("npcResponse").get_to(line.npcResponse);
+        j.at("playerQuery").get_to(line.playerLine);
+        j.at("npcResponse").get_to(line.npcLine);
         j.at("gameTimeHours").get_to(line.gameTimeHours);
     }
 
-        bool IsGreeting(std::string msg) {
+    bool IsGreeting(std::string msg) {
         std::string greetings[] = {"Hello", "CYRGenericHello"};
         for (std::string greeting : greetings) {
             if (msg == greeting) {
@@ -68,7 +75,7 @@ namespace Hooks {
         config.FilterShortReplies = true;
         config.FilterNonUniqueGreetings = true;
         config.NPCLineBlacklist = {"Can I help you?", "Farewell", "See you later"};
-        config.PlayerLineBlacklist = {"Stage1Hello", "I want you to.."};
+        config.PlayerLineBlacklist = {"Stage1Hello", "I want you to..", "Goodbye. (Remove from Mantella conversation)"};
     }
 
     // -------------------------------------------------------------------------
@@ -177,7 +184,7 @@ namespace Hooks {
 
             for (auto& line : dialogueLineIterator->second) {
                 // Concatenate the player query and NPC response separated by a semicolon
-                concatenatedLines += line.playerQuery + "; " + line.npcResponse + " ";
+                concatenatedLines += line.playerLine + "; " + line.npcLine + " ";
             }
 
             // Remove the trailing space, if any
@@ -231,27 +238,76 @@ namespace Hooks {
             s_lastPlayerTopicText = std::string(a_topicText);
         }
 
-        // Fire an event to Mantella
-        static void AddMantellaEventX(const char* a_event) {
-            SKSE::ModCallbackEvent modEvent{"MantellaAddEvent", a_event};
-            if (auto modCallbackSource = SKSE::GetModCallbackEventSource(); modCallbackSource)
-                modCallbackSource->SendEvent(&modEvent);
-            else
-                RE::DebugNotification("AddMantellaEvent: No ModCallbackEventSource found!");
+        static void AddDialogueExchangeAsync(const DialogueLine& exchange) {
+            std::async(std::launch::async, [exchange]() {
+                try {
+                    // Send the first message (playerLine) and wait for its completion
+                    std::future<cpr::Response> future1 =
+                        serverInterface.AddMessageToMantellaAsync(exchange.playerLine, exchange.playerName);
+
+                    cpr::Response response1 = future1.get();  // Blocks this async thread
+
+                    // Handle the response of the first message
+                    if (response1.status_code != 200) {
+                        MDebugNotification("Failed to send player message to Mantella");
+                        logger::error("Failed to send player message to Mantella: ");
+                        return;  // Exit if the first message failed
+                    }
+
+                    // Send the second message (npcLine) after the first has succeeded
+                    std::future<cpr::Response> future2 =
+                        serverInterface.AddMessageToMantellaAsync(exchange.npcLine, exchange.playerName);
+
+                    cpr::Response response2 = future2.get();  // Blocks this async thread
+
+                    // Handle the response of the second message
+                    if (response2.status_code != 200) {
+                        MDebugNotification("Failed to send NPC message to Mantella");
+                        logger::error("Failed to send NPC message to Mantella: ");
+                    }
+
+                } catch (const std::exception& e) {
+                    // Handle any exceptions thrown during the asynchronous operations
+                    logger::error("Exception in AddDialogueExchangeAsync");
+                }
+            });
         }
 
-        static void AddMantellaEvent(std::string msg) {
-            auto targetFunction = "AddIngameEvent";
-            auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
-            auto mantellaQuest = RE::TESDataHandler::GetSingleton()->LookupForm<RE::TESQuest>(0x03D41A, "Mantella.esp");
-            auto questHandle = vm->GetObjectHandlePolicy()->GetHandleForObject(mantellaQuest->GetFormType(), mantellaQuest);
-            RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
-            RE::BSTSmartPointer<RE::BSScript::Object> script = nullptr;
-            if (vm->FindBoundObject(questHandle, "MantellaConversation", script))
-            {
-                auto args = RE::MakeFunctionArguments(std::move(msg));
-                vm->DispatchMethodCall1(script, targetFunction, args, callback);
+        static bool ShouldFilterDialoge(std::string playerLine, std::string npcLine, RE::TESTopicInfo* topicInfo) {
+            // Skip if we've processed this text before
+            if (HasAlreadyProcessed(playerLine)) return true;
+
+            // Filter if player line is in the config blacklist
+            if (std::find(config.PlayerLineBlacklist.begin(), config.PlayerLineBlacklist.end(), playerLine) !=
+                config.PlayerLineBlacklist.end()) {
+                return true;
             }
+
+            // Filter if NPC line is in the config blacklist
+            if (std::find(config.NPCLineBlacklist.begin(), config.NPCLineBlacklist.end(), npcLine) !=
+                config.NPCLineBlacklist.end()) {
+                return true;
+            }
+
+            if (topicInfo != nullptr && config.FilterNonUniqueGreetings && IsGreeting(playerLine) &&
+                !(topicInfo->data.flags & RE::TOPIC_INFO_DATA::TOPIC_INFO_FLAGS::kSayOnce)) {
+                // Dont send greetings to mantella to prevent spamming the model with generic lines
+                MDebugNotification("Filtered Greeting");
+                return true;
+            }
+            if (topicInfo == nullptr && config.FilterNonUniqueGreetings && IsGreeting(playerLine))
+                logger::error("TopicInfo is null, cannot filter greeting");
+
+            return false;
+        }
+
+        static RE::MenuTopicManager::Dialogue* GetDialogue() {
+            auto topicManager = RE::MenuTopicManager::GetSingleton();
+            if (!topicManager) {
+                logger::error("ShowSubtitle::thunk: MenuTopicManager is null!");
+                return nullptr;
+            }
+            return topicManager->lastSelectedDialogue;
         }
 
         // The hook function
@@ -263,47 +319,29 @@ namespace Hooks {
             if (!config.ShouldAddDialogueToMantella) return;
             if (!a_speaker) return;
 
-            auto topicManager = RE::MenuTopicManager::GetSingleton();
-            if (!topicManager) {
-                logger::error("ShowSubtitle::thunk: MenuTopicManager is null!");
-                return;
-            }
-
-            auto dialogue = topicManager->lastSelectedDialogue;
-            if (!dialogue) return;
+            RE::MenuTopicManager::Dialogue* dialogue = GetDialogue();
+            if (dialogue == nullptr) return;
 
             const std::string currentPlayerTopicText = dialogue->topicText.c_str();
             if (currentPlayerTopicText.empty()) {
-                RE::DebugNotification("ShowSubtitle::thunk: No player topic text found!");
+                logger::warn("ShowSubtitle::thunk: currentPlayerTopicText is empty!");
                 return;
             }
 
-            if (dialogue->parentTopicInfo)
-            {
-                if (config.FilterNonUniqueGreetings && IsGreeting(dialogue->topicText.c_str()) && !dialogue->parentTopicInfo->saidOnce)
-                {
-                    // Dont send greetings to mantella to prevent spamming the model with generic lines
-                    MDebugNotification("Filtered Greeting");
-                    return;
-                }
-            } else
-                RE::DebugNotification("Parent Topic Info is null");
-
-            // Skip if we've processed this text before
-            if (HasAlreadyProcessed(currentPlayerTopicText)) return;
-
             // Build the NPC's response
-            std::string npcResponse;
+            std::string npcLine;
             for (auto* response : dialogue->responses) {
                 if (response && !response->text.empty()) {
-                    if (!npcResponse.empty()) npcResponse += " ";
-                    npcResponse += response->text.c_str();
+                    if (!npcLine.empty()) npcLine += " ";
+                    npcLine += response->text.c_str();
                 }
             }
 
+            if (ShouldFilterDialoge(currentPlayerTopicText, npcLine, dialogue->parentTopicInfo)) return;
+
             auto actor = skyrim_cast<RE::Actor*>(a_speaker);
             if (!actor) {
-                RE::DebugNotification("ShowSubtitle::thunk: a_speaker is not an Actor!");
+                logger::error("ShowSubtitle::thunk: a_speaker is empty or not an actor!");
                 return;
             }
 
@@ -314,57 +352,42 @@ namespace Hooks {
                 if (auto name = player->GetActorBase()->GetName(); name && name[0] != '\0') playerName = name;
             }
 
-            std::string playerEvent = std::string(playerName) + ": " + currentPlayerTopicText;
-            std::string npcEvent = "";
-            if (!npcResponse.empty()) npcEvent = std::string(actor->GetDisplayFullName()) + ": " + npcResponse;
-
-            // Placeholder: Force "OnConversationStarted" each time a new line is processed.
-            MantellaDialogueTracker::OnConversationStarted();
+            auto exchange = DialogueLine();
+            exchange.playerLine = currentPlayerTopicText;
+            exchange.playerName = playerName;
+            exchange.npcLine = npcLine;
+            exchange.npcName = actor->GetDisplayFullName();
+            exchange.gameTimeHours = GetCurrentGameTimeHours();
 
             // Are we in a conversation?
             bool conversationRunning = MantellaDialogueTracker::IsConversationRunning();
             bool actorInConversation = MantellaDialogueTracker::IsActorInConversation(actor);
 
-            // Prepare a DialogueLine entry
-            DialogueLine newLine;
-            newLine.playerQuery = playerEvent;
-            newLine.npcResponse = npcEvent;
-            newLine.gameTimeHours = GetCurrentGameTimeHours();
-
             // If conversation not running, store for later
             if (!conversationRunning) {
                 if (!MantellaDialogueTracker::DialogueTrackerHasError) {
                     auto formID = actor->GetFormID();
-                    MantellaDialogueTracker::s_dialogueHistory[formID].push_back(newLine);
+                    MantellaDialogueTracker::s_dialogueHistory[formID].push_back(exchange);
                     logger::info("Stored dialogue for FormID %u in s_dialogueHistory.", formID);
                     MDebugNotification("No Conv, Stored line");
-
-                }
-                // Fire events even if conversation not running
-                AddMantellaEvent(playerEvent.c_str());
-                if (!npcEvent.empty()) AddMantellaEvent(npcEvent.c_str());
+                } else
+                    MDebugNotification("Mantella Dialoge Error");
 
             } else {
                 // If conversation is running
                 if (actorInConversation) {
                     // If the speaker is a participant, send lines to Mantella
-                    AddMantellaEvent(playerEvent.c_str());
-                    if (!npcEvent.empty()) AddMantellaEvent(npcEvent.c_str());
-
+                    AddDialogueExchangeAsync(exchange);
                 } else {
-
                     // Special case: speaker is not in participants,
                     // but conversation is running with others.
                     // Broadcast to all participants + store for possible future use
-                    AddMantellaEvent(playerEvent.c_str());
-                    if (!npcEvent.empty()) AddMantellaEvent(npcEvent.c_str());
+                    AddDialogueExchangeAsync(exchange);
 
                     if (!MantellaDialogueTracker::DialogueTrackerHasError) {
                         auto formID = actor->GetFormID();
-                        MantellaDialogueTracker::s_dialogueHistory[formID].push_back(newLine);
+                        MantellaDialogueTracker::s_dialogueHistory[formID].push_back(exchange);
                         logger::info("Stored dialogue for FormID %u in s_dialogueHistory.", formID);
-                        MDebugNotification("Not in convo: nLines:" + MantellaDialogueTracker::s_dialogueHistory[formID].size());
-
                     }
                 }
             }
@@ -386,14 +409,13 @@ namespace Hooks {
             for (auto& [id, offset] : targets) {
                 REL::Relocation<std::uintptr_t> target(id, offset);
                 stl::write_thunk_call<ShowSubtitle>(target.address());
-                logger::info("Installed ShowSubtitle hook at address: {:x}", target.address());
             }
         }
     };
 
-
 }  // namespace Hooks
 
+#pragma region Serialization
 // -----------------------------------------------------------------------------
 // JSON Serialization and Deserialization Functions
 // -----------------------------------------------------------------------------
@@ -421,8 +443,8 @@ bool DeserializeDialogueHistoryFromJSON(const std::string& jsonString) {
             Hooks::MantellaDialogueTracker::s_dialogueHistory.emplace(formID, std::move(dialogueLines));
         }
         MDebugNotification(("Loaded " + std::to_string(Hooks::MantellaDialogueTracker::s_dialogueHistory.size()) +
-                           " actors with pending lines")
-                              .c_str());
+                            " actors with pending lines")
+                               .c_str());
 
         logger::info("Deserialized dialogue history with %zu entries.",
                      Hooks::MantellaDialogueTracker::s_dialogueHistory.size());
@@ -435,8 +457,6 @@ bool DeserializeDialogueHistoryFromJSON(const std::string& jsonString) {
         return false;
     }
 }
-
-
 
 // -----------------------------------------------------------------------------
 // SKSE Serialization Callbacks
@@ -510,7 +530,7 @@ void MyRevertCallback(SKSE::SerializationInterface*) {
     Hooks::MantellaDialogueTracker::s_dialogueHistory.clear();
     logger::info("MyRevertCallback: Cleared dialogue history.");
 }
-
+#pragma endregion
 
 // -----------------------------------------------------------------------------
 // SKSE Messaging Interface Listener
@@ -538,11 +558,49 @@ void OnSKSEMessage(SKSE::MessagingInterface::Message* a_msg) {
     }
 }
 
+void notifyConversationStart(RE::StaticFunctionTag*) { Hooks::MantellaDialogueTracker::OnConversationStarted(); }
+
+void notifyActorAdded(RE::StaticFunctionTag*, std::vector<RE::TESForm*> actors) {
+    for (auto actorForm : actors) {
+        auto actor = skyrim_cast<RE::Actor*>(actorForm);
+        if (actor) {
+            Hooks::MantellaDialogueTracker::OnNewParticipant(actor);
+        }
+    }
+}
+
+void notifyActorRemoved(RE::StaticFunctionTag*, std::vector<RE::TESForm*> actors) {}
+
+void notifyConversationEnd(RE::StaticFunctionTag*) {
+    // Placeholder: Clear the last participants list
+    Hooks::MantellaDialogueTracker::s_lastParticipants.clear();
+}
+
+bool Bind(RE::BSScript::IVirtualMachine* vm) {
+    std::string classname = "MantellaVanillaDialogue";
+    vm->RegisterFunction("notifyConversationStart", classname, notifyConversationStart);
+    vm->RegisterFunction("notifyNpcAdded", classname, notifyActorAdded);
+    vm->RegisterFunction("notifyNpcRemoved", classname, notifyActorRemoved);
+    vm->RegisterFunction("notifyConversationEnd", classname, notifyConversationEnd);
+    return true;
+}
+
+void SetupServerInterface() {
+    port = MantellaPapyrusInterface::GetMantellaServerPort();
+    if (port == -1) {
+        logger::error("Failed to get Mantella server port from MCM.");
+        port = 4999;
+        return;
+    }
+    serverInterface.port = port;
+}
 
 // Typical SKSE entry point
 SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     SKSE::Init(skse);
+    SKSE::GetPapyrusInterface()->Register(Bind);
     SetupLog();
+    SetupServerInterface();
     Hooks::loadConfiguration();
 
     if (auto messaging = SKSE::GetMessagingInterface()) {
