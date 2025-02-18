@@ -3,7 +3,6 @@
 #include <cpr/cpr.h>
 
 #include <format>
-#include <future>
 #include <string>
 
 struct MantellaServerInterface {
@@ -11,45 +10,35 @@ struct MantellaServerInterface {
 
     int port;
     std::string baseUrl = "http://localhost";
-    int timeout = 3000;  
+    int timeoutMs = 3000;
 
     /**
-     * @brief Asynchronously posts `jsonBody` to the Mantella server at `route`
-     * @return A std::future<cpr::Response> which you can wait on or chain
+     * @brief Posts `jsonBody` to the Mantella server at `route` (synchronous).
+     * @return A cpr::Response containing the results of the HTTP POST.
      */
-    std::future<cpr::Response> PostToMantellaServerAsync(const std::string& route, const std::string& jsonBody) {
-        // Create a promise/future pair
-        std::promise<cpr::Response> promise;
-        auto future = promise.get_future();
-
+    cpr::Response PostToMantellaServer(const std::string& route, const std::string& jsonBody) {
         // Construct the URL
         std::string url = baseUrl + ":" + std::to_string(port) + "/" + route;
 
-        // Launch the async call using cpr::PostCallback
-        cpr::PostCallback(
-            // The lambda will fulfill the promise once the request finishes
-            [p = std::move(promise)](cpr::Response r) mutable { p.set_value(std::move(r)); }, cpr::Url{url},
-            cpr::ConnectTimeout{timeout},
-            // Add any auth/headers as needed
-            cpr::Authentication{"user", "pass", cpr::AuthMode::BASIC},
-            cpr::Header{{"Content-Type", "application/json"}}, cpr::Header{{"Accept", "application/json"}},
-            cpr::Body{jsonBody});
-
-        // Return the future that will eventually hold the HTTP response
-        return future;
+        // Perform the POST request synchronously
+        return cpr::Post(cpr::Url{url}, cpr::ConnectTimeout{timeoutMs},
+                         // Add any auth/headers as needed
+                         cpr::Authentication{"user", "pass", cpr::AuthMode::BASIC},
+                         cpr::Header{{"Content-Type", "application/json"}}, cpr::Header{{"Accept", "application/json"}},
+                         cpr::Body{jsonBody});
     }
 
     /**
-     * @brief Inserts a chat message into Mantella. Returns a future to chain or wait upon.
+     * @brief Inserts a chat message into Mantella. This is a synchronous call.
      * @param msg The chat message
      * @param characterName The name of the character sending the message
-     * @return A std::future<cpr::Response>
+     * @return cpr::Response
      */
-    std::future<cpr::Response> AddMessageToMantellaAsync(const std::string& msg, const std::string& characterName) {
+    cpr::Response AddMessageToMantella(const std::string& msg, const std::string& characterName) {
         // Create the JSON body
         auto args = std::format(R"({{"message": "{}", "characterName": "{}"}})", msg, characterName);
 
-        // Send the request asynchronously
-        return PostToMantellaServerAsync(addMessageRoute, args);
+        // Send the request synchronously
+        return PostToMantellaServer(addMessageRoute, args);
     }
 };
