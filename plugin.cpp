@@ -5,7 +5,6 @@
 #include <vector>   // For std::vector
 
 #include "MantellaPapyrusInterface.h"
-#include "MantellaServerInterface.h"
 #include "PCH.h"
 #include "json.h"  // Include nlohmann/json library
 #include "logger.h"
@@ -15,7 +14,6 @@ using json = nlohmann::json;
 // Ensure you have included spdlog in your project and initialized it in logger.h/cpp
 static void MDebugNotification(const char* a_notification) { RE::DebugNotification(a_notification); }
 int port;
-MantellaServerInterface serverInterface;
 
 namespace Hooks {
 
@@ -193,13 +191,8 @@ namespace Hooks {
             }
             // Send a single Mantella event with the concatenated lines
             if (!concatenatedLines.empty()) {
-                SKSE::ModCallbackEvent modEvent{"MantellaAddEvent", concatenatedLines.c_str()};
-                if (auto source = SKSE::GetModCallbackEventSource(); source) {
-                    source->SendEvent(&modEvent);
-                    logger::info("Sent MantellaAddEvent with concatenated dialogue.");
-                } else {
-                    logger::error("SendAndDiscardCapturedDialogue: ModCallbackEventSource is null!");
-                }
+                MantellaPapyrusInterface::AddMantellaEvent(concatenatedLines.c_str());
+
             }
 
             // Erase the processed entry from dialogue history
@@ -239,38 +232,10 @@ namespace Hooks {
         }
 
         static void AddDialogueExchangeAsync(const DialogueLine& exchange) {
-            std::async(std::launch::async, [exchange]() {
-                try {
-                    // Send the first message (playerLine) and wait for its completion
-                    std::future<cpr::Response> future1 =
-                        serverInterface.AddMessageToMantellaAsync(exchange.playerLine, exchange.playerName);
-
-                    cpr::Response response1 = future1.get();  // Blocks this async thread
-
-                    // Handle the response of the first message
-                    if (response1.status_code != 200) {
-                        MDebugNotification("Failed to send player message to Mantella");
-                        logger::error("Failed to send player message to Mantella: ");
-                        return;  // Exit if the first message failed
-                    }
-
-                    // Send the second message (npcLine) after the first has succeeded
-                    std::future<cpr::Response> future2 =
-                        serverInterface.AddMessageToMantellaAsync(exchange.npcLine, exchange.playerName);
-
-                    cpr::Response response2 = future2.get();  // Blocks this async thread
-
-                    // Handle the response of the second message
-                    if (response2.status_code != 200) {
-                        MDebugNotification("Failed to send NPC message to Mantella");
-                        logger::error("Failed to send NPC message to Mantella: ");
-                    }
-
-                } catch (const std::exception& e) {
-                    // Handle any exceptions thrown during the asynchronous operations
-                    logger::error("Exception in AddDialogueExchangeAsync");
-                }
-            });
+            MantellaPapyrusInterface::AddMantellaEvent(exchange.playerName + ": " + exchange.playerLine + "; " +
+                                                       exchange.npcName + ": " + exchange.npcLine);
+            
+            
         }
 
         static bool ShouldFilterDialoge(std::string playerLine, std::string npcLine, RE::TESTopicInfo* topicInfo) {
@@ -585,22 +550,13 @@ bool Bind(RE::BSScript::IVirtualMachine* vm) {
     return true;
 }
 
-void SetupServerInterface() {
-    port = MantellaPapyrusInterface::GetMantellaServerPort();
-    if (port == -1) {
-        logger::error("Failed to get Mantella server port from MCM.");
-        port = 4999;
-        return;
-    }
-    serverInterface.port = port;
-}
+
 
 // Typical SKSE entry point
 SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     SKSE::Init(skse);
     SKSE::GetPapyrusInterface()->Register(Bind);
     SetupLog();
-    SetupServerInterface();
     Hooks::loadConfiguration();
 
     if (auto messaging = SKSE::GetMessagingInterface()) {
