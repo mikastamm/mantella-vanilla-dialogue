@@ -42,15 +42,13 @@ namespace Hooks {
     }
 
     bool IsGreeting(std::string msg) {
-        std::string greetings[] = {"Hello", "CYRGenericHello"};
+        std::string greetings[] = {"Hello", "CYRGenericHello", "DialogueGenericHello"};
         for (std::string greeting : greetings)
             if (msg == greeting) return true;
         return false;
     }
 
-    static bool IsEnabled() {
-        return MantellaPapyrusInterface::GetMantellaEnableVanillaDialogueAwareness() &&
-               MantellaDialogueIniConfig::config.EnableVanillaDialogueTracking;
+    static bool IsEnabled() { return MantellaPapyrusInterface::GetMantellaEnableVanillaDialogueAwareness();
     }
 
     // -------------------------------------------------------------------------
@@ -241,10 +239,19 @@ namespace Hooks {
             func(a_this, a_speaker, a_subtitle, a_alwaysDisplay);
             if (ShouldLogHookConfirmation == true) { logger::info(" -> Success"); ShouldLogHookConfirmation = false; }
 
-            if (!IsEnabled()) return;
-            if (!a_speaker) return;
+            if (!IsEnabled()) {
+                logger::debug(" -> Mantella dialogue awareness is disabled.");
+                return;
+            }
+            if (!a_speaker) {
+                logger::error("ShowSubtitle::thunk: a_speaker is null!");
+                return;
+            }
             RE::MenuTopicManager::Dialogue* dialogue = GetDialogue();
-            if (dialogue == nullptr) return;
+            if (dialogue == nullptr) {
+                logger::error("ShowSubtitle::thunk: Cannot get dialogue!");
+                return;
+            }
             const std::string currentPlayerTopicText = dialogue->topicText.c_str();
             if (currentPlayerTopicText.empty()) {
                 logger::warn("ShowSubtitle::thunk: currentPlayerTopicText is empty!");
@@ -273,8 +280,10 @@ namespace Hooks {
             exchange.gameTimeHours = GetCurrentGameTimeHours();
             if (std::find(MantellaDialogueIniConfig::config.NPCNamesToIgnore.begin(),
                           MantellaDialogueIniConfig::config.NPCNamesToIgnore.end(),
-                          exchange.npcName) != MantellaDialogueIniConfig::config.NPCNamesToIgnore.end())
+                          exchange.npcName) != MantellaDialogueIniConfig::config.NPCNamesToIgnore.end()) {
+                logger::debug(" -> Ignored NPC from Ignorelist: {}", exchange.npcName);
                 return;
+            }
             bool conversationRunning = MantellaDialogueTracker::IsConversationRunning();
             bool actorInConversation = MantellaDialogueTracker::IsActorInConversation(actor);
 
@@ -317,7 +326,7 @@ namespace Hooks {
         static void Install() {
             std::array targets{std::make_pair(RELOCATION_ID(19119, 19521), 0x2B2),
                                std::make_pair(RELOCATION_ID(36543, 37544), OFFSET(0x8EC, 0x8C2))};
-            if (REL::Module::IsAE)
+            if (REL::Module::IsAE())
                 targets = std::array{std::make_pair(RELOCATION_ID(19521, 19521), 0x2B2),
                                      std::make_pair(RELOCATION_ID(37544, 37544), OFFSET(0x8C2, 0x8C2))};
             for (auto& [id, offset] : targets) {

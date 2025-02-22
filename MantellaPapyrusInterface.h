@@ -36,11 +36,15 @@ RE::VMHandle GetMantellaRepositoryHandle() {
 
  bool GetMantellaEnableVanillaDialogueAwareness() {
     RE::BSScript::Variable property;
-    auto result = GetMantellaMcmSetting("EnableVanillaDialogueAwareness", property);
+    auto result = GetMantellaMcmSetting("enableVanillaDialogueAwareness", property);
     if (result) {
         return property.GetBool();
     }
-    return false;
+    else
+    {
+        logger::error("Failed to get Mantella setting enableVanillaDialogueAwareness");
+    }
+    return true;
 }
 
 /// <returns>The port the mantella server is reachable under (From the Mcm)</returns>

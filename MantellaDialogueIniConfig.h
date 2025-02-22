@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "ini.h"
+#include "logger.h"
 
 #ifdef _WIN32
     #define STRCASECMP _stricmp
@@ -18,7 +19,6 @@ namespace MantellaDialogueIniConfig {
 
     // Configuration struct
     struct Configuration {
-        bool EnableVanillaDialogueTracking;
         bool FilterShortReplies;
         int FilterShortRepliesMinWordCount;
         bool FilterNonUniqueGreetings;
@@ -65,12 +65,9 @@ namespace MantellaDialogueIniConfig {
         auto* helper = static_cast<IniConfigHelper*>(user);
         Configuration* config = helper->configPtr;
 
-        // Ensure we are in the correct section
-        if (strcmp(section, "MantellaDialogue") != 0) return 1;
 
-        if (strcmp(name, "EnableVanillaDialogueTracking") == 0)
-            config->EnableVanillaDialogueTracking = (STRCASECMP(value, "true") == 0 || strcmp(value, "1") == 0);
-        else if (strcmp(name, "FilterShortReplies") == 0)
+      
+        if (strcmp(name, "FilterShortReplies") == 0)
             config->FilterShortReplies = (STRCASECMP(value, "true") == 0 || strcmp(value, "1") == 0);
         else if (strcmp(name, "FilterShortRepliesMinWordCount") == 0)
             config->FilterShortRepliesMinWordCount = std::max(1, atoi(value));  // Ensure min word count is at least 1
@@ -95,7 +92,6 @@ namespace MantellaDialogueIniConfig {
     // Function to load configuration from an INI file, falling back to defaults
     void loadConfiguration() {
         // Set default values
-        config.EnableVanillaDialogueTracking = true;
         config.FilterShortReplies = true;
         config.FilterShortRepliesMinWordCount = 4;
         config.FilterNonUniqueGreetings = true;
@@ -104,10 +100,10 @@ namespace MantellaDialogueIniConfig {
         config.PlayerLineBlacklist = {"Stage1Hello", "I want you to..", "Goodbye. (Remove from Mantella conversation)"};
         config.NPCNamesToIgnore = {};
 
-        const std::string filename = "MantellaDialogue.ini";
+        const std::string filename = "SKSE/Plugins/MantellaDialogue.ini";
         std::ifstream infile(filename);
         if (!infile.good()) {
-            // INI file does not exist, use defaults
+            logger::error("Failed to open INI file: {}", filename);
             return;
         }
         infile.close();
