@@ -5,6 +5,7 @@
 #include <vector>   // For std::vector
 
 #include "MantellaPapyrusInterface.h"
+#include "MantellaDialogueIniConfig.h"
 #include "PCH.h"
 #include "json.h"  // Include nlohmann/json library
 #include "logger.h"
@@ -52,29 +53,8 @@ namespace Hooks {
         return false;
     }
 
-    // -----------------------------------------------------------------------------
-    // Configuration
-    // -----------------------------------------------------------------------------
 
-    struct Configuration {
-        bool ShouldAddDialogueToMantella;
-        bool FilterShortReplies;
-        bool FilterNonUniqueGreetings;
-        // Filter query-response pairs where response is in this list
-        std::vector<std::string> NPCLineBlacklist;
-        // Filter query-response pairs where query is in this list
-        std::vector<std::string> PlayerLineBlacklist;
-    };
-    Configuration config;
 
-    void loadConfiguration() {
-        // TODO: Load from ini file or settings ui
-        config.ShouldAddDialogueToMantella = true;
-        config.FilterShortReplies = true;
-        config.FilterNonUniqueGreetings = true;
-        config.NPCLineBlacklist = {"Can I help you?", "Farewell", "See you later"};
-        config.PlayerLineBlacklist = {"Stage1Hello", "I want you to..", "Goodbye. (Remove from Mantella conversation)"};
-    }
 
     // -------------------------------------------------------------------------
     // A simple helper to fetch current game time in hours.
@@ -243,25 +223,31 @@ namespace Hooks {
             if (HasAlreadyProcessed(playerLine)) return true;
 
             // Filter if player line is in the config blacklist
-            if (std::find(config.PlayerLineBlacklist.begin(), config.PlayerLineBlacklist.end(), playerLine) !=
-                config.PlayerLineBlacklist.end()) {
+            if (std::find(MantellaDialogueIniConfig::config.PlayerLineBlacklist.begin(), MantellaDialogueIniConfig::config.PlayerLineBlacklist.end(), playerLine) !=
+                MantellaDialogueIniConfig::config.PlayerLineBlacklist.end()) {
                 return true;
             }
 
             // Filter if NPC line is in the config blacklist
-            if (std::find(config.NPCLineBlacklist.begin(), config.NPCLineBlacklist.end(), npcLine) !=
-                config.NPCLineBlacklist.end()) {
+            if (std::find(MantellaDialogueIniConfig::config.NPCLineBlacklist.begin(), MantellaDialogueIniConfig::config.NPCLineBlacklist.end(), npcLine) !=
+                MantellaDialogueIniConfig::config.NPCLineBlacklist.end()) {
                 return true;
             }
 
-            if (topicInfo != nullptr && config.FilterNonUniqueGreetings && IsGreeting(playerLine) &&
+            if (topicInfo != nullptr && MantellaDialogueIniConfig::config.FilterNonUniqueGreetings && IsGreeting(playerLine) &&
                 !(topicInfo->data.flags & RE::TOPIC_INFO_DATA::TOPIC_INFO_FLAGS::kSayOnce)) {
                 // Dont send greetings to mantella to prevent spamming the model with generic lines
                 MDebugNotification("Filtered Greeting");
                 return true;
             }
-            if (topicInfo == nullptr && config.FilterNonUniqueGreetings && IsGreeting(playerLine))
+            if (topicInfo == nullptr && MantellaDialogueIniConfig::config.FilterNonUniqueGreetings && IsGreeting(playerLine))
                 logger::error("TopicInfo is null, cannot filter greeting");
+
+            if (MantellaDialogueIniConfig::config.FilterShortReplies && MantellaDialogueIniConfig::split(npcLine, ' ').size() < MantellaDialogueIniConfig::config.FilterShortRepliesMinWordCount) {
+                // Filter short replies
+                MDebugNotification("Filtered Short Reply");
+                return true;
+            }
 
             return false;
         }
@@ -281,7 +267,7 @@ namespace Hooks {
             // Call original
             func(a_this, a_speaker, a_subtitle, a_alwaysDisplay);
 
-            if (!config.ShouldAddDialogueToMantella) return;
+            if (!MantellaDialogueIniConfig::config.EnableVanillaDialogueTracking) return;
             if (!a_speaker) return;
 
             RE::MenuTopicManager::Dialogue* dialogue = GetDialogue();
@@ -323,6 +309,11 @@ namespace Hooks {
             exchange.npcLine = npcLine;
             exchange.npcName = actor->GetDisplayFullName();
             exchange.gameTimeHours = GetCurrentGameTimeHours();
+
+            if (std::find(MantellaDialogueIniConfig::config.NPCNamesToIgnore.begin(), MantellaDialogueIniConfig::config.NPCNamesToIgnore.end(), exchange.npcName) != MantellaDialogueIniConfig::config.NPCNamesToIgnore.end()) {
+                // Skip if NPC is in the ignore list
+                return;
+            }
 
             // Are we in a conversation?
             bool conversationRunning = MantellaDialogueTracker::IsConversationRunning();
@@ -557,7 +548,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     SKSE::Init(skse);
     SKSE::GetPapyrusInterface()->Register(Bind);
     SetupLog();
-    Hooks::loadConfiguration();
+    MantellaDialogueIniConfig::loadConfiguration();
 
     if (auto messaging = SKSE::GetMessagingInterface()) {
         messaging->RegisterListener("SKSE", OnSKSEMessage);
