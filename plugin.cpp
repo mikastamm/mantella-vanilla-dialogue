@@ -48,6 +48,11 @@ namespace Hooks {
         return false;
     }
 
+    static bool IsEnabled() {
+        return MantellaPapyrusInterface::GetMantellaEnableVanillaDialogueAwareness() &&
+               MantellaDialogueIniConfig::config.EnableVanillaDialogueTracking;
+    }
+
     // -------------------------------------------------------------------------
     // A simple helper to fetch current game time in hours.
     // -------------------------------------------------------------------------
@@ -236,7 +241,7 @@ namespace Hooks {
             func(a_this, a_speaker, a_subtitle, a_alwaysDisplay);
             if (ShouldLogHookConfirmation == true) { logger::info(" -> Success"); ShouldLogHookConfirmation = false; }
 
-            if (!MantellaDialogueIniConfig::config.EnableVanillaDialogueTracking) return;
+            if (!IsEnabled()) return;
             if (!a_speaker) return;
             RE::MenuTopicManager::Dialogue* dialogue = GetDialogue();
             if (dialogue == nullptr) return;
@@ -428,20 +433,32 @@ void OnSKSEMessage(SKSE::MessagingInterface::Message* a_msg) {
 }
 
 void notifyConversationStart(RE::StaticFunctionTag*) {
-    logger::info("notifyConversationStart: Called");
+    logger::info("Conversation Started");
+    if (!Hooks::IsEnabled()) return;
     Hooks::MantellaDialogueTracker::OnConversationStarted();
 }
 
 void notifyActorAdded(RE::StaticFunctionTag*, std::vector<RE::TESForm*> actors) {
-    logger::info("notifyActorAdded: Called with {} actors", actors.size());
+    
+    // calll OnNewParticipant() for each actor
+    for (auto* actor : actors) {
+        auto actorForm = skyrim_cast<RE::Actor*>(actor);
+        if (!actorForm) {
+            logger::error("notifyActorAdded: Actor is not an Actor form!");
+            continue;
+        }
+        Hooks::MantellaDialogueTracker::OnNewParticipant(actorForm);
+    }
+
 }
 
 void notifyActorRemoved(RE::StaticFunctionTag*, std::vector<RE::TESForm*> actors) {
-    logger::info("notifyActorRemoved: Called with {} actors", actors.size());
+    logger::debug("Actor left conversation");
 }
 
 void notifyConversationEnd(RE::StaticFunctionTag*) {
-    logger::info("notifyConversationEnd: Called");
+    logger::info("Conversation Ended");
+    if (!Hooks::IsEnabled()) return;
     Hooks::MantellaDialogueTracker::s_lastParticipants.clear();
 }
 
