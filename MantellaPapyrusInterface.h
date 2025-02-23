@@ -1,4 +1,5 @@
 #pragma once
+#include <string>  // For std::string
 
 namespace MantellaPapyrusInterface {
     static inline std::string PreviousSentEvent = "";
@@ -8,6 +9,7 @@ namespace MantellaPapyrusInterface {
             logger::debug("Skipping duplicate event: {}", msg);
             return;
         }
+        PreviousSentEvent = msg;
 
         auto targetFunction = "AddMantellaEvent";
         auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
@@ -18,7 +20,6 @@ namespace MantellaPapyrusInterface {
         if (vm->FindBoundObject(questHandle, "MantellaInterface", script)) {
             auto args = RE::MakeFunctionArguments(std::move(msg));
             vm->DispatchMethodCall1(script, targetFunction, args, callback);
-            PreviousSentEvent = msg;
         } else {
             logger::error("!!! Failed to find MantellaInterface script");
         }
