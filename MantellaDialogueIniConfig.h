@@ -92,7 +92,7 @@ namespace MantellaDialogueIniConfig {
         config.PlayerLineBlacklist = {"Stage1Hello", "I want you to..", "Goodbye. (Remove from Mantella conversation)"};
         config.NPCNamesToIgnore = {};
 
-        const std::string filename = "SKSE/Plugins/MantellaDialogue.ini";
+        const std::string filename = "Data/SKSE/Plugins/MantellaDialogue.ini";
         std::ifstream infile(filename);
         if (!infile.good()) {
             logger::error("Failed to open INI file: {}", filename);

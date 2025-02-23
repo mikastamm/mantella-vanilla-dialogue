@@ -77,13 +77,13 @@ namespace Hooks {
         static void Setup() {
             auto dataHandler = RE::TESDataHandler::GetSingleton();
             if (!dataHandler) {
-                logger::error("MantellaDialogueTracker::Setup: TESDataHandler is null!");
+                logger::error("!!! MantellaDialogueTracker::Setup: TESDataHandler is null!");
                 DialogueTrackerHasError = true;
                 return;
             }
             aParticipants = dataHandler->LookupForm<RE::BGSListForm>(0xE4537, "Mantella.esp");
             if (!aParticipants) {
-                logger::error("MantellaDialogueTracker::Setup: aParticipants is null!");
+                logger::error("!!! MantellaDialogueTracker::Setup: aParticipants is null!");
                 DialogueTrackerHasError = true;
                 return;
             }
@@ -221,7 +221,7 @@ namespace Hooks {
         static RE::MenuTopicManager::Dialogue* GetDialogue() {
             auto topicManager = RE::MenuTopicManager::GetSingleton();
             if (!topicManager) {
-                logger::error("ShowSubtitle::thunk: MenuTopicManager is null!");
+                logger::error("!!! ShowSubtitle::thunk: MenuTopicManager is null!");
                 return nullptr;
             }
             return topicManager->lastSelectedDialogue;
@@ -245,12 +245,12 @@ namespace Hooks {
                 return;
             }
             if (!a_speaker) {
-                logger::error("ShowSubtitle::thunk: a_speaker is null!");
+                logger::error("!!! ShowSubtitle::thunk: a_speaker is null!");
                 return;
             }
             RE::MenuTopicManager::Dialogue* dialogue = GetDialogue();
             if (dialogue == nullptr) {
-                logger::error("ShowSubtitle::thunk: Cannot get dialogue!");
+                logger::error("!!! ShowSubtitle::thunk: Cannot get dialogue!");
                 return;
             }
             const std::string currentPlayerTopicText = dialogue->topicText.c_str();
@@ -265,7 +265,7 @@ namespace Hooks {
                     npcLine += (npcLine.empty() ? "" : " ") + std::string(response->text.c_str());
             auto actor = skyrim_cast<RE::Actor*>(a_speaker);
             if (!actor) {
-                logger::error("ShowSubtitle::thunk: a_speaker is empty or not an actor!");
+                logger::error("!!! ShowSubtitle::thunk: a_speaker is empty or not an actor!");
                 return;
             }
             // Get the player's name
@@ -340,11 +340,23 @@ namespace Hooks {
 // -----------------------------------------------------------------------------
 // JSON Serialization and Deserialization Functions
 // -----------------------------------------------------------------------------
-
+constexpr size_t MAX_DIALOGUE_LINES = 20000;
 std::string SerializeDialogueHistoryToJSON() {
+    size_t totalDialogueLines = 0;
+    for (const auto& [formID, dialogueLines] : Hooks::MantellaDialogueTracker::s_dialogueHistory) {
+        totalDialogueLines += dialogueLines.size();
+        if (totalDialogueLines > MAX_DIALOGUE_LINES) {
+            // Exceeded threshold: Discard all saved dialogue history, to avoid savegame bloat. The threshold is so high (~6MB of data)
+            // that this should never happen, but just to be safe.
+            logger::warn("!!! Exceeded max dialogue lines threshold: Discarding all saved dialogue history.");
+            return "{}";
+        }
+    }
+
     json j;
-    for (const auto& [formID, dialogueLines] : Hooks::MantellaDialogueTracker::s_dialogueHistory)
+    for (const auto& [formID, dialogueLines] : Hooks::MantellaDialogueTracker::s_dialogueHistory) {
         j[std::to_string(formID)] = dialogueLines;
+    }
     return j.dump();
 }
 
@@ -362,10 +374,10 @@ bool DeserializeDialogueHistoryFromJSON(const std::string& jsonString) {
                      Hooks::MantellaDialogueTracker::s_dialogueHistory.size());
         return true;
     } catch (const json::parse_error& e) {
-        logger::error("Failed to parse dialogue history JSON: %s", e.what());
+        logger::error("!!! Failed to parse dialogue history JSON: %s", e.what());
         return false;
     } catch (const std::exception& e) {
-        logger::error("Exception during deserialization: %s", e.what());
+        logger::error("!!! Exception during deserialization: %s", e.what());
         return false;
     }
 }
@@ -378,21 +390,21 @@ void MySaveCallback(SKSE::SerializationInterface* a_intfc) {
         constexpr std::uint32_t recordType = 'HIST';
         constexpr std::uint32_t version = 1;
         if (!a_intfc->OpenRecord(recordType, version)) {
-            logger::error("MySaveCallback: Failed to open 'HIST' record for serialization.");
+            logger::error("!!! MySaveCallback: Failed to open 'HIST' record for serialization.");
             return;
         }
         std::uint32_t jsonLength = static_cast<std::uint32_t>(jsonString.size());
         if (!a_intfc->WriteRecordData(&jsonLength, sizeof(jsonLength))) {
-            logger::error("MySaveCallback: Failed to write JSON string length.");
+            logger::error("!!! MySaveCallback: Failed to write JSON string length.");
             return;
         }
         if (!a_intfc->WriteRecordData(jsonString.c_str(), jsonLength)) {
-            logger::error("MySaveCallback: Failed to write JSON string data.");
+            logger::error("!!! MySaveCallback: Failed to write JSON string data.");
             return;
         }
         logger::info("MySaveCallback: Serialized dialogue history to SKSE co-save.");
     } catch (const std::exception& e) {
-        logger::error("MySaveCallback: Exception during serialization: %s", e.what());
+        logger::error(" !!! MySaveCallback: Exception during serialization: %s", e.what());
     }
 }
 
@@ -403,21 +415,21 @@ void MyLoadCallback(SKSE::SerializationInterface* a_intfc) {
             if (type != 'HIST') continue;
             std::uint32_t jsonLength = 0;
             if (a_intfc->ReadRecordData(&jsonLength, sizeof(jsonLength)) != sizeof(jsonLength)) {
-                logger::error("MyLoadCallback: Failed to read JSON string length.");
+                logger::error("!!! MyLoadCallback: Failed to read JSON string length.");
                 continue;
             }
             std::string jsonString(jsonLength, '\0');
             if (a_intfc->ReadRecordData(&jsonString[0], jsonLength) != jsonLength) {
-                logger::error("MyLoadCallback: Failed to read JSON string data.");
+                logger::error("!!! MyLoadCallback: Failed to read JSON string data.");
                 continue;
             }
             if (DeserializeDialogueHistoryFromJSON(jsonString))
                 logger::info("MyLoadCallback: Successfully loaded dialogue history from SKSE co-save.");
             else
-                logger::error("MyLoadCallback: Failed to deserialize dialogue history from JSON.");
+                logger::error("!!! MyLoadCallback: Failed to deserialize dialogue history from JSON.");
         }
     } catch (const std::exception& e) {
-        logger::error("MyLoadCallback: Exception during deserialization: %s", e.what());
+        logger::error("!!! MyLoadCallback: Exception during deserialization: %s", e.what());
     }
 }
 
@@ -436,7 +448,7 @@ void OnSKSEMessage(SKSE::MessagingInterface::Message* a_msg) {
     if (a_msg->type == SKSE::MessagingInterface::kPostLoad) {
         auto serialization = SKSE::GetSerializationInterface();
         if (!serialization) {
-            logger::error("OnSKSEMessage: Failed to get SKSE Serialization Interface.");
+            logger::error("!!! OnSKSEMessage: Failed to get SKSE Serialization Interface.");
             return;
         }
        
@@ -447,7 +459,7 @@ void OnSKSEMessage(SKSE::MessagingInterface::Message* a_msg) {
             serialization->SetRevertCallback(MyRevertCallback);
         } 
         catch (const std::exception& e) {
-            logger::error("OnSKSEMessage: Exception during SKSE Serialization callbacks: %s", e.what());
+            logger::error("!!! OnSKSEMessage: Exception during SKSE Serialization callbacks: %s", e.what());
         }
 
         logger::info("OnSKSEMessage: Registered SKSE Serialization callbacks for dialogue history.");
@@ -465,7 +477,7 @@ void notifyActorAdded(RE::StaticFunctionTag*, std::vector<RE::TESForm*> actors) 
     for (auto* actor : actors) {
         auto actorForm = skyrim_cast<RE::Actor*>(actor);
         if (!actorForm) {
-            logger::error("notifyActorAdded: Actor is not an Actor form!");
+            logger::error("!!! notifyActorAdded: Actor is not an Actor form!");
             continue;
         }
         Hooks::MantellaDialogueTracker::OnNewParticipant(actorForm);
@@ -500,7 +512,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
         messaging->RegisterListener("SKSE", OnSKSEMessage);
         logger::info("SKSEPluginLoad: Registered SKSE messaging listener.");
     } else
-        logger::error("SKSEPluginLoad: Failed to get SKSE Messaging Interface!");
+        logger::error("!!! SKSEPluginLoad: Failed to get SKSE Messaging Interface!");
     Hooks::ShowSubtitle::Install();
     logger::info("SKSEPluginLoad: Installed ShowSubtitle hook.");
     return true;

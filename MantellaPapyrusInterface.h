@@ -18,8 +18,8 @@ namespace MantellaPapyrusInterface {
 
 RE::VMHandle GetMantellaRepositoryHandle() {
     auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
-    auto mcmQuest = RE::TESDataHandler::GetSingleton()->LookupForm<RE::TESQuest>(0x025F12, "Mantella.esp");
-    auto questHandle = vm->GetObjectHandlePolicy()->GetHandleForObject(mcmQuest->GetFormType(), mcmQuest);
+    auto mantellaQuest = RE::TESDataHandler::GetSingleton()->LookupForm<RE::TESQuest>(0xD62, "Mantella.esp");
+    auto questHandle = vm->GetObjectHandlePolicy()->GetHandleForObject(mantellaQuest->GetFormType(), mantellaQuest);
     return questHandle;
 }
 
@@ -28,8 +28,13 @@ RE::VMHandle GetMantellaRepositoryHandle() {
     auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
     RE::BSTSmartPointer<RE::BSScript::Object> script = nullptr;
     if (vm->FindBoundObject(questHandle, "MantellaRepository", script)) {
-        auto result = vm->GetPropertyValue(script, propertyName.c_str(), a_getVal);
-        return result;
+        auto propertyPointer = script->GetProperty(propertyName);
+        if (!propertyPointer) {
+            logger::error("Failed to get Mantella setting {}", propertyName);
+            return false;
+        }
+        a_getVal = *propertyPointer;
+        return true;
     }
     return false;
 }
@@ -37,13 +42,11 @@ RE::VMHandle GetMantellaRepositoryHandle() {
  bool GetMantellaEnableVanillaDialogueAwareness() {
     RE::BSScript::Variable property;
     auto result = GetMantellaMcmSetting("enableVanillaDialogueAwareness", property);
-    if (result) {
+   
+    if (result && property.IsBool()) 
         return property.GetBool();
-    }
     else
-    {
         logger::error("Failed to get Mantella setting enableVanillaDialogueAwareness");
-    }
     return true;
 }
 
@@ -51,7 +54,7 @@ RE::VMHandle GetMantellaRepositoryHandle() {
  int GetMantellaServerPort() { 
     RE::BSScript::Variable property;
     auto result = GetMantellaMcmSetting("HttpPort", property);
-    if (result) {
+    if (result && property.IsInt()) {
        int port = property.GetSInt();
         return port;
     }
