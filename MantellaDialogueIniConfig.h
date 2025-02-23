@@ -9,12 +9,6 @@
 #include "ini.h"
 #include "logger.h"
 
-#ifdef _WIN32
-    #define STRCASECMP _stricmp
-#else
-    #define STRCASECMP strcasecmp
-#endif
-
 namespace MantellaDialogueIniConfig {
 
     // Configuration struct
@@ -45,7 +39,7 @@ namespace MantellaDialogueIniConfig {
         std::vector<std::string> tokens;
         std::istringstream tokenStream(s);
         std::string token;
-        while (std::getline(tokenStream, token, delimiter)) tokens.push_back(token);  // No trimming here
+        while (std::getline(tokenStream, token, delimiter)) tokens.push_back(token);
         return tokens;
     }
 
@@ -65,16 +59,14 @@ namespace MantellaDialogueIniConfig {
         auto* helper = static_cast<IniConfigHelper*>(user);
         Configuration* config = helper->configPtr;
 
-
-      
         if (strcmp(name, "FilterShortReplies") == 0)
-            config->FilterShortReplies = (STRCASECMP(value, "true") == 0 || strcmp(value, "1") == 0);
+            config->FilterShortReplies = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
         else if (strcmp(name, "FilterShortRepliesMinWordCount") == 0)
             config->FilterShortRepliesMinWordCount = std::max(1, atoi(value));  // Ensure min word count is at least 1
         else if (strcmp(name, "FilterNonUniqueGreetings") == 0)
-            config->FilterNonUniqueGreetings = (STRCASECMP(value, "true") == 0 || strcmp(value, "1") == 0);
+            config->FilterNonUniqueGreetings = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
         else if (strcmp(name, "DebugLogVanillaDialogue") == 0)
-            config->DebugLogVanillaDialogue = (STRCASECMP(value, "true") == 0 || strcmp(value, "1") == 0);
+            config->DebugLogVanillaDialogue = (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
         else if (strcmp(name, "NPCLineBlacklist") == 0) {
             auto tokens = splitAndTrim(value, ';');
             if (!tokens.empty()) config->NPCLineBlacklist = tokens;
