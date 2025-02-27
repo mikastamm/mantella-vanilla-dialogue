@@ -269,8 +269,7 @@ namespace Hooks {
                     npcLine += (npcLine.empty() ? "" : " ") + std::string(response->text.c_str());
             auto actor = skyrim_cast<RE::Actor*>(a_speaker);
             if (!actor) {
-                logger::error("!!! ShowSubtitle::thunk: a_speaker is empty or not an actor! Line to be spoken was:");
-                logger::error(npcLine);
+                logger::error("!!! ShowSubtitle::thunk: a_speaker is empty or not an actor! Line to be spoken was: {}", npcLine);
                 return;
             }
             // Get the player's name
