@@ -28,18 +28,22 @@ namespace Hooks {
         float gameTimeHours;
     };
 
-    // Serialize DialogueLine to JSON
     inline void to_json(json& j, const DialogueLine& line) {
-        j = json{
-            {"playerQuery", line.playerLine}, {"npcResponse", line.npcLine}, {"gameTimeHours", line.gameTimeHours}};
+        j = json{{"playerName", line.playerName},
+                 {"playerQuery", line.playerLine},
+                 {"npcName", line.npcName},
+                 {"npcResponse", line.npcLine},
+                 {"gameTimeHours", line.gameTimeHours}};
     }
 
-    // Deserialize DialogueLine from JSON
     inline void from_json(const json& j, DialogueLine& line) {
+        j.at("playerName").get_to(line.playerName);
         j.at("playerQuery").get_to(line.playerLine);
+        j.at("npcName").get_to(line.npcName);
         j.at("npcResponse").get_to(line.npcLine);
         j.at("gameTimeHours").get_to(line.gameTimeHours);
     }
+
 
     bool IsGreeting(std::string msg) {
         std::string greetings[] = {"Hello", "CYRGenericHello", "DialogueGenericHello"};
@@ -265,7 +269,8 @@ namespace Hooks {
                     npcLine += (npcLine.empty() ? "" : " ") + std::string(response->text.c_str());
             auto actor = skyrim_cast<RE::Actor*>(a_speaker);
             if (!actor) {
-                logger::error("!!! ShowSubtitle::thunk: a_speaker is empty or not an actor!");
+                logger::error("!!! ShowSubtitle::thunk: a_speaker is empty or not an actor! Line to be spoken was:");
+                logger::error(npcLine);
                 return;
             }
             // Get the player's name
