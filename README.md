@@ -1,88 +1,62 @@
-> 📜 other templates available at https://github.com/SkyrimScripting/SKSE_Templates
+Makes Mantella conversations aware of things said in the vanilla dialogue system through the Event system.
 
-# SKSE - Debug MessageBox and Notification
+Excerpt from ysolda.json to how vanilla dialogue is added. 
+```
+        {
+            "role": "user",
+            "content": "(Prisoner: What do you know of the Khajiit?; Ysolda: About the same as everyone else. They're the cat-folk of Elsweyr. Great warriors, good traders. The way I hear it, Elsweyr ain't nothing like Skyrim. It's got tropical forests and dusty badlands. It sounds awful!) I'm sorry, I was just debugging, don't take it personally."
+        },
+```
 
-- [SKSE - Debug MessageBox and Notification](#skse---debug-messagebox-and-notification)
-  - [What does it do?](#what-does-it-do)
-  - [Requirements](#requirements)
-  - [Project setup](#project-setup)
-  - [Setup your own repository](#setup-your-own-repository)
+## How it works
+Situation: _Player selects a line to say in the dialogue menu_. Depending on the state of mantella, there are 3 different things that can happen:
+
+**Player is in a mantella conversation with that npc** -> AddEvent is called
+
+**Player is not in a conversation** -> Dialogue Exchange gets stored to SKSE save file and sent the next time a Mantella conversation with that NPC starts
+    - Theres a limit in place of ~5MB of stored dialogue line, exceeding that will wipe all stored vanilla dialogue
+    - We potentially store all spoken vanilla dialogue for eternity, if no mantella conversation is ever started with an NPC the user previously had dialogue with
+
+**Player is in a conversation, but the NPC they are in dialogue with is not part of it** -> AddEvent is called & the voiceline is stored and resent when that NPC enters the conversation or the next time a conversation with them is started
 
 ---
 
-A simple SKSE plugin for Skyrim using:
+Note: As soon as a dialogue item is selected by the player, all the sentences get sent to Mantella that the NPC will say in response. even if the player exits the dialogue early, Mantella will still be aware of all the lines the NPC would have said.
 
-- C++
-- CMake
-- [CommonLibSSE NG](https://github.com/CharmedBaryon/CommonLibSSE-NG)
-  - _automatically downloaded using vcpkg integration of CMake_
+## SKSE Plugin
 
-> Because this uses CommonLibSSE NG, it supports Skyrim SSE, AE, GOG, and VR!
+All the logic for this is in an SKSE plug-in, The code for which can be found [here](https://github.com/mikastamm/mantella-vanilla-dialogue).
 
-## What does it do?
+I have a prebuilt MantellaDialogue.dll there, but you are of course free to build it from source yourself, before including it in the main repo. 
 
-Whenever the player activates an item, e.g. opens a door or picks up a sword, it displays a message!
+## Configuration
 
-- A "Debug MessageBox" popup is displayed
-- A "Debug Notification" message is displayed (in the top-left of the game)
+There are some extra configuration options possible through the `SKSE/Plugins/MantellaDialogue.ini` file.
+Of interest are mostly the blacklist items, as some dialogue (eg. Configuration stuff from mods) would just confuse the ai, so we can blacklist it here.
+```ini
+; Toggles Dialogue Tracking (Also available in MCM)
+EnableVanillaDialogueTracking=true
 
-Read [`plugin.cpp`](plugin.cpp) for details on what it's doing!
+; If the NPC's reply is less than FilterShortRepliesMinWordCount, Do not send it to Mantella.
+; can help filter out some menus and mod related dialogue options.
+FilterShortReplies=false
+FilterShortRepliesMinWordCount=4
+; filters all player lines and npc responses for greetings that are non unique (ie. can be triggered each time the player starts a conversation with that NPC.)
+FilterNonUniqueGreetings=true
+; If the NPCs response or line is included in one of these, discard both the player's line and the NPCs line.
+NPCLineBlacklist=Can I help you?, Farewell, See you later
+; If the players line is included in these, discard both the players and the NPCs line.
+PlayerLineBlacklist=Stage1Hello, I want you to.., Goodbye. (Remove from Mantella conversation), DialogueGenericHello
 
-## Requirements
+; Add the names of the NPCs here for which you do not want to track dialogue (comma seperated)
+; The Names must be the same as they appear in the game.
+NPCNamesToIgnore=
+```
+## Known Issues
+- When you start the mantella conversation and have previously saved vanilla dialogue for that character, it is sent to mantella and removed from the storage, so it wont get sent a second time. If you then end the conversation without saying anything, or it is too short for summarization, those dialogue lines will be lost.
+    - This also happens if the conversation ends due to an error & is too short to summarize or does not get summarized due to the error
+- When too many events are in the queue, vanilla dialogue lines might be culled and thus never sent to mantella
+- If an error occurs while generating the response, and it has vanilla dialogue events attached, that dialogue will never get sent to mantella
 
-- [Visual Studio 2022](https://visualstudio.microsoft.com/) (_the free Community edition is fine!_)
-- [CMake](https://cmake.org/download/) 3.25.1+ (_please install the Latest Release_)
-- [`vcpkg`](https://github.com/microsoft/vcpkg)
-  - 1. Clone the repository using git OR [download it as a .zip](https://github.com/microsoft/vcpkg/archive/refs/heads/master.zip)
-  - 2. Go into the `vcpkg` folder and double-click on `bootstrap-vcpkg.bat`
-  - 3. Edit your system or user Environment Variables and add a new one:
-    - Name: `VCPKG_ROOT`  
-      Value: `C:\path\to\wherever\your\vcpkg\folder\is`
-
-<img src="https://raw.githubusercontent.com/SkyrimScripting/Resources/main/Screenshots/Setting%20Environment%20Variables/VCPKG_ROOT.png" height="150">
-
-Once you have Visual Studio 2022 installed, you can open this folder in basically any C++ editor, e.g. [VS Code](https://code.visualstudio.com/) or [CLion](https://www.jetbrains.com/clion/) or [Visual Studio](https://visualstudio.microsoft.com/)
-- > _for VS Code, if you are not automatically prompted to install the [C++](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools) and [CMake Tools](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cmake-tools) extensions, please install those and then close VS Code and then open this project as a folder in VS Code_
-
-You may need to click `OK` on a few windows, but the project should automatically run CMake!
-
-It will _automatically_ download [CommonLibSSE NG](https://github.com/CharmedBaryon/CommonLibSSE-NG) and everything you need to get started making your new plugin!
-
-## Project setup
-
-By default, when this project compiles it will output a `.dll` for your SKSE plugin into the `build/` folder.
-
-If you want to configure this project to output your plugin files
-into your Skyrim Special Edition's "`Data`" folder:
-
-- Set the `SKYRIM_FOLDER` environment variable to the path of your Skyrim installation  
-  e.g. `C:\Program Files (x86)\Steam\steamapps\common\Skyrim Special Edition`
-
-<img src="https://raw.githubusercontent.com/SkyrimScripting/Resources/main/Screenshots/Setting%20Environment%20Variables/SKYRIM_FOLDER.png" height="150">
-
-If you want to configure this project to output your plugin files
-into your "`mods`" folder:  
-(_for Mod Organizer 2 or Vortex_)
-
-- Set the `SKYRIM_MODS_FOLDER` environment variable to the path of your mods folder:  
-  e.g. `C:\Users\<user>\AppData\Local\ModOrganizer\Skyrim Special Edition\mods`  
-  e.g. `C:\Users\<user>\AppData\Roaming\Vortex\skyrimse\mods`
-
-<img src="https://raw.githubusercontent.com/SkyrimScripting/Resources/main/Screenshots/Setting%20Environment%20Variables/SKYRIM_MODS_FOLDER.png" height="150">
-
-## Setup your own repository
-
-If you clone this template on GitHub, please:
-
-- Go into `LICENSE` and change the year and change `<YOUR NAME HERE>` to your name.
-- Go into `CODE_OF_CONDUCT.md` and change `<YOUR CONTACT INFO HERE>` to your contact information.
-
-It's good to have a `Code of Conduct` and GitHub will show your project's `CODE_OF_CONDUCT.md` in the project sidebar.
-
-If you'd like to know more about open source licenses, see:
-- [Licensing a repository](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository)
-- [Choose an open source license](https://choosealicense.com/)
-
-**If you use this template, PLEASE release your project as a public open source project.** 💖
-
-**PLEASE DO NOT RELEASE YOUR SKSE PLUGIN ON NEXUS/ETC WITHOUT MAKING THE SOURCE CODE AVAILABLE**
+### Testing
+So far I tested it on VR and AE using Windows. Hopefully it will work on linux as well. 
