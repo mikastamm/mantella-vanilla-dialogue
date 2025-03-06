@@ -1,4 +1,5 @@
 > This is included on mantella starting at v0.14
+> 
 > Not useable on its own without the necessary changes to the mantella papyrus scripts
 
 Makes Mantella conversations aware of things said in the vanilla dialogue system through the Event system.
