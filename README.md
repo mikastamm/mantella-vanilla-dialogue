@@ -1,6 +1,6 @@
-> This is included on mantella starting at v0.14
+> This will be included in mantella starting at v0.14 (hopefully)
 > 
-> Not useable on its own without the necessary changes to the mantella papyrus scripts
+> Not useable on its own without the [necessary changes to the mantella papyrus scripts ](https://github.com/art-from-the-machine/Mantella-Spell/pull/120)
 
 Makes Mantella conversations aware of things said in the vanilla dialogue system through the Event system.
 
