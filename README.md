@@ -1,4 +1,4 @@
-> This will be included in mantella starting at v0.14 (hopefully)
+> This will be included in mantella starting at v0.14 (hopefully) 
 > 
 > Not useable on its own without the [necessary changes to the mantella papyrus scripts ](https://github.com/art-from-the-machine/Mantella-Spell/pull/120)
 
